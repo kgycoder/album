@@ -1418,6 +1418,7 @@ function _songList(tracks, numbered) {
 /* ════════════════════════════════════════════
    SEARCH — 아티스트 · 앨범 · 곡 · (YouTube 영상)
 ════════════════════════════════════════════ */
+function _miMode(on) { document.getElementById('s-res')?.parentElement?.classList.toggle('mi-page', on); }
 let _sRender = null;        // 검색 탭에서 현재 화면을 다시 그리는 함수
 const _sStack = [];         // 아티스트/앨범 페이지 이동 기록 (뒤로가기)
 let _miTracks = [];
@@ -1427,6 +1428,7 @@ function _sHead(area, title) {
     h.innerHTML = `<h2>${esc(title)}</h2>`; area.appendChild(h);
 }
 function _renderSearch(d) {
+    _miMode(false);
     const area = document.getElementById('s-res'); area.innerHTML = '';
     if (d.artists.length) {
         _sHead(area, '아티스트');
@@ -1458,7 +1460,7 @@ async function doSearch(query) {
     const q = query.trim();
     const area = document.getElementById('s-res');
     area.innerHTML = `<div class="state"><div class="spinner"></div><p style="margin-top:12px">검색 중...</p></div>`;
-    _sStack.length = 0; _sRender = null;
+    _sStack.length = 0; _sRender = null; _miMode(false);
     /* 영상 검색(기존 그대로: 쿼리에 키워드를 덧붙이지 않음)과 곡/아티스트/앨범 검색을 동시에 요청 */
     const mq = kind => cachedCall({ type: 'musicSearch', kind, query: q }, 300000);
     const [vr, sr, ar, br] = await Promise.allSettled([
@@ -1488,7 +1490,7 @@ async function miOpen(kind, id) {
     if (document.getElementById('np')?.classList.contains('on')) closeNP();
     const area = document.getElementById('s-res');
     if (_sRender) _sStack.push(_sRender);
-    _sRender = null;
+    _sRender = null; _miMode(true);
     area.innerHTML = _spin;
     try {
         const d = await cachedCall({ type: 'musicBrowse', browseId: id });
@@ -1502,7 +1504,7 @@ function miBack() {
     const area = document.getElementById('s-res');
     _sRender = _sStack.pop() || null;
     if (_sRender) _sRender();
-    else area.innerHTML = `<div class="state"><p>음악, 아티스트, 앨범을 검색해보세요</p></div>`;
+    else { _miMode(false); area.innerHTML = `<div class="state"><p>음악, 아티스트, 앨범을 검색해보세요</p></div>`; }
     document.getElementById('v-search')?.scrollTo?.(0, 0);
 }
 function miPlay(shuffle) {
@@ -1511,6 +1513,7 @@ function miPlay(shuffle) {
     S.q = q; S.idx = 0; playTrack(q[0], 0);
 }
 function _renderMiPage(kind, d) {
+    _miMode(true);
     const area = document.getElementById('s-res'); area.innerHTML = '';
     const isAl = kind === 'album', art = _artSz(d.thumb, 500);
     const hd = document.createElement('div');
@@ -1518,8 +1521,13 @@ function _renderMiPage(kind, d) {
     const meta = isAl ? [lnk, esc(d.year || ''), esc(d.label || '')].filter(Boolean).join(' · ') : '';
     hd.innerHTML = `<div class="mi-back" onclick="miBack()">‹ 뒤로</div>
       <div class="mi-hd ${isAl ? 'al' : 'ar'}"><img class="mi-hd-img" src="${esc(art)}" alt="">
-        <div class="mi-hd-tx"><h2>${esc(d.name || '')}</h2><p>${meta}</p>${!isAl && d.desc ? `<p class="mi-desc">${esc(d.desc)}</p>` : ''}</div></div>
+        <div class="mi-hd-tx"><h2>${esc(d.name || '')}</h2><p>${meta}</p>${!isAl && d.desc ? `<p class="mi-desc">${esc(d.desc)}</p><span class="mi-more-txt" style="display:none">더보기</span>` : ''}</div></div>
       <div class="mi-acts"><button class="mi-btn pri" onclick="miPlay(false)">▶ 재생</button><button class="mi-btn" onclick="miPlay(true)">셔플</button></div>`;
+    const ds = hd.querySelector('.mi-desc'), mt = hd.querySelector('.mi-more-txt');
+    if (ds && mt) {
+        mt.onclick = () => { const o = ds.classList.toggle('open'); mt.textContent = o ? '접기' : '더보기'; };
+        requestAnimationFrame(() => { if (ds.scrollHeight > ds.clientHeight + 1) mt.style.display = ''; });
+    }
     hd.querySelector('.mi-lnk')?.addEventListener('click', e => miOpen('artist', e.target.dataset.a));
     area.appendChild(hd);
     _miTracks = [];
