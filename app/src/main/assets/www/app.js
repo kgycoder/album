@@ -1451,7 +1451,10 @@ function _renderSearch(d) {
         const r = document.createElement('div'); r.className = 'hrow';
         d.albums.slice(0, 12).forEach(a => r.appendChild(mkAlbumCard(a))); area.appendChild(r);
     }
-    if (d.songs.length) { _sHead(area, '곡'); area.appendChild(_songList(d.songs, false)); }
+    if (d.songs.length) {
+        _sHead(area, d.metaErr ? '곡 (메타데이터 검색 실패: ' + d.metaErr + ')' : '곡');   // 실패 원인을 화면에 표시
+        area.appendChild(_songList(d.songs, false));
+    }
     if (d.videos.length) {
         const h = document.createElement('div'); h.className = 'sh';
         h.innerHTML = `<h2>동영상 <span style="font-size:12px;font-weight:400;color:var(--t3)">${d.videos.length}개</span></h2>`;
@@ -1479,7 +1482,11 @@ async function doSearch(query) {
         cachedCall({ type: 'search', query: q }, 300000), mq('song'), mq('artist'), mq('album')]);
     let songs = sr.status === 'fulfilled' ? (sr.value.items || []) : [];
     /* 메타데이터 곡 검색이 실패하거나 비면, 기본 검색 결과에서 음악으로 보이는 항목을 곡으로 대신 보여준다(곡 섹션이 비지 않도록) */
-    if (!songs.length && vr.status === 'fulfilled') songs = rankMusicResults(vr.value.tracks || []).slice(0, 15);
+    let metaErr = '';
+    if (!songs.length && vr.status === 'fulfilled') {
+        metaErr = sr.status === 'rejected' ? (sr.reason?.message || '오류') : '결과 없음';
+        songs = rankMusicResults(vr.value.tracks || []).slice(0, 15);
+    }
     const artists = ar.status === 'fulfilled' ? (ar.value.items || []) : [];
     const albums = br.status === 'fulfilled' ? (br.value.items || []) : [];
     /* 검색어가 아티스트 이름과 정확히 일치하면, 상세 페이지와 같은 "깨끗한 원곡 목록"을 곡 맨 위에 둔다 */
@@ -1505,7 +1512,7 @@ async function doSearch(query) {
     }
     const sid = new Set(songs.map(t => t.id));
     const d = {
-        songs, artists, albums,
+        songs, artists, albums, metaErr,
         videos: vr.status === 'fulfilled' ? sortMusicFirst(vr.value.tracks || []).filter(t => !sid.has(t.id)) : []
     };
     if (!d.songs.length && !d.artists.length && !d.albums.length && !d.videos.length) {
