@@ -5576,3 +5576,14 @@ html.glass-native .c-dur {
 .card { will-change: auto; }
 .card.beat-active { will-change: transform, box-shadow; }
 .cgrid .card { content-visibility: auto; contain-intrinsic-size: auto 150px; }
+
+/* 아티스트/앨범 페이지: 검색 헤더·입력창 숨김 */
+.mi-page > :not(#s-res) { display: none !important; }
+/* 설명 더보기 */
+.mi-desc.open { display: block; -webkit-line-clamp: unset; overflow: visible; }
+.mi-more-txt { display: inline-block; margin-top: 4px; font-size: 12.5px; font-weight: 600; color: var(--acc); cursor: pointer; }
+/* 긴 이름이 카드 폭을 밀어내지 않도록 고정 */
+.mi-ac, .mi-al { width: 112px; min-width: 0; max-width: 112px; overflow: hidden; }
+.mi-hd-tx h2 { overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+/* NP 앨범 정보: 곡 제목 바로 위, 브랜드 핑크 */
+.np-album { color: var(--acc); opacity: 1; font-size: 12px; font-weight: 600; margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
