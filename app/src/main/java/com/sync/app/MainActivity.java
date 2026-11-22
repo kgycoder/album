@@ -649,18 +649,11 @@ public class MainActivity extends AppCompatActivity {
 
     /** 일시적인 400/5xx/네트워크 오류는 한 번 재시도 */
     private String ytmCall(String ep, JSONObject body) throws Exception {
-        String ex = body.optString("_extra", "");
         try { return ytmCallOnce(ep, body); }
-        catch (IOException e) {
-            Thread.sleep(300);
-            if (!ex.isEmpty()) body.put("_extra", ex);
-            return ytmCallOnce(ep, body);
-        }
+        catch (IOException e) { Thread.sleep(300); return ytmCallOnce(ep, body); }
     }
 
     private String ytmCallOnce(String ep, JSONObject body) throws Exception {
-        String extra = body.optString("_extra", "");   // 이어받기(continuation) 등 URL 뒤에 붙일 추가 쿼리
-        body.remove("_extra");
         JSONObject client = new JSONObject();
         client.put("clientName", "WEB_REMIX");
         client.put("clientVersion", YTM_VER);
@@ -668,7 +661,7 @@ public class MainActivity extends AppCompatActivity {
         client.put("gl", "KR");
         body.put("context", new JSONObject().put("client", client));
         Request req = new Request.Builder()
-                .url("https://music.youtube.com/youtubei/v1/" + ep + "?prettyPrint=false" + extra)
+                .url("https://music.youtube.com/youtubei/v1/" + ep + "?prettyPrint=false")
                 .post(RequestBody.create(body.toString(),
                         MediaType.parse("application/json; charset=utf-8")))
                 .addHeader("X-YouTube-Client-Name", "67")
@@ -895,45 +888,28 @@ public class MainActivity extends AppCompatActivity {
         } catch (JSONException ignored) {}
     }
 
-    private void ytmCollect(JSONObject doc, String want, java.util.HashSet<String> seen, JSONArray out, int limit) throws JSONException {
-        for (Object o : ytmFind(doc, "musicResponsiveListItemRenderer")) {
-            if (!(o instanceof JSONObject)) continue;
-            JSONObject it = ytmList((JSONObject) o);
-            if (it == null || !it.optString("kind").equals(want)) continue;
-            if (!seen.add(it.optString("id"))) continue;
-            out.put(it);
-            if (out.length() >= limit) break;
-        }
-    }
-
     private void doMusicSearch(JSONObject msg) {
         String id = msg.optString("id", "0");
         try {
             String kind = msg.optString("kind", "song");
             String p = kind.equals("artist") ? "EgWKAQIgAWoMEA4QChADEAQQCRAF"
                      : kind.equals("album")  ? "EgWKAQIYAWoMEA4QChADEAQQCRAF"
+                     : kind.equals("video")  ? "EgWKAQIQAWoMEA4QChADEAQQCRAF"
                                              : "EgWKAQIIAWoMEA4QChADEAQQCRAF";
-            final String want = kind;
+            final String want = kind.equals("video") ? "song" : kind;   // 영상 항목도 곡과 같은 메타(아티스트/앨범/썸네일) 구조로 파싱됨
             JSONObject body = new JSONObject();
             body.put("query", msg.optString("query"));
             body.put("params", p);
             JSONObject doc = new JSONObject(ytmCall("search", body));
             JSONArray out = new JSONArray();
             java.util.HashSet<String> seen = new java.util.HashSet<>();
-            final int limit = kind.equals("song") ? 60 : 20;   // 곡은 첫 페이지(약 20개)만으로는 부족 → 이어받기로 확장
-            ytmCollect(doc, want, seen, out, limit);
-            for (int pg = 0; pg < 3 && kind.equals("song") && out.length() < limit; pg++) {
-                String tok = ytmStr(doc, "continuation");
-                if (tok.isEmpty()) tok = ytmStr(doc, "token");
-                if (tok.isEmpty()) break;
-                try {
-                    JSONObject nb = new JSONObject();
-                    nb.put("_extra", "&ctoken=" + tok + "&continuation=" + tok);
-                    doc = new JSONObject(ytmCall("search", nb));
-                } catch (Exception e) { break; }
-                int before = out.length();
-                ytmCollect(doc, want, seen, out, limit);
-                if (out.length() == before) break;
+            for (Object o : ytmFind(doc, "musicResponsiveListItemRenderer")) {
+                if (!(o instanceof JSONObject)) continue;
+                JSONObject it = ytmList((JSONObject) o);
+                if (it == null || !it.optString("kind").equals(want)) continue;
+                if (!seen.add(it.optString("id"))) continue;
+                out.put(it);
+                if (out.length() >= 20) break;
             }
             JSONObject res = new JSONObject();
             res.put("items", out);
