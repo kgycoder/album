@@ -5587,3 +5587,10 @@ html.glass-native .c-dur {
 .mi-hd-tx h2 { overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 /* NP 앨범 정보: 곡 제목 바로 위, 브랜드 핑크 */
 .np-album { color: var(--acc); opacity: 1; font-size: 12px; font-weight: 600; margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 아티스트 설명 팝업 */
+.mi-pop { position: fixed; inset: 0; z-index: 9999; display: none; align-items: center; justify-content: center; padding: 24px; background: rgba(0,0,0,.6); }
+.mi-pop.on { display: flex; }
+.mi-pop-box { width: 100%; max-width: 420px; max-height: 72vh; display: flex; flex-direction: column; gap: 12px; padding: 18px; border-radius: 18px; background: #1c1c1e; box-shadow: 0 20px 60px rgba(0,0,0,.6); }
+.mi-pop-h { font-size: 17px; font-weight: 700; overflow-wrap: anywhere; }
+.mi-pop-body { flex: 1; min-height: 0; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.65; color: rgba(255,255,255,.82); -webkit-overflow-scrolling: touch; }
