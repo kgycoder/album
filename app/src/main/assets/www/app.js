@@ -1478,6 +1478,8 @@ async function doSearch(query) {
     const [vr, sr, ar, br] = await Promise.allSettled([
         cachedCall({ type: 'search', query: q }, 300000), mq('song'), mq('artist'), mq('album')]);
     let songs = sr.status === 'fulfilled' ? (sr.value.items || []) : [];
+    /* 메타데이터 곡 검색이 실패하거나 비면, 기본 검색 결과에서 음악으로 보이는 항목을 곡으로 대신 보여준다(곡 섹션이 비지 않도록) */
+    if (!songs.length && vr.status === 'fulfilled') songs = rankMusicResults(vr.value.tracks || []).slice(0, 15);
     const artists = ar.status === 'fulfilled' ? (ar.value.items || []) : [];
     const albums = br.status === 'fulfilled' ? (br.value.items || []) : [];
     /* 검색어가 아티스트 이름과 정확히 일치하면, 상세 페이지와 같은 "깨끗한 원곡 목록"을 곡 맨 위에 둔다 */
