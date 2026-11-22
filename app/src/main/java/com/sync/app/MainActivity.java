@@ -938,7 +938,7 @@ public class MainActivity extends AppCompatActivity {
             }
             res.put("name", name);
             res.put("thumb", thumb);
-            res.put("desc", desc.length() > 320 ? desc.substring(0, 320) + "…" : desc);
+            res.put("desc", desc.length() > 3000 ? desc.substring(0, 3000) : desc);
             res.put("artist", hm.optString("artist"));
             res.put("artistId", hm.optString("artistId"));
             res.put("year", hm.optString("year"));
