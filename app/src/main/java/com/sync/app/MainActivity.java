@@ -647,7 +647,13 @@ public class MainActivity extends AppCompatActivity {
     private static final Pattern YTM_COUNT = Pattern.compile(
             ".*\\d.*(회|views|plays|구독자|subscribers|곡|songs|분|min).*", Pattern.CASE_INSENSITIVE);
 
+    /** 일시적인 400/5xx/네트워크 오류는 한 번 재시도 */
     private String ytmCall(String ep, JSONObject body) throws Exception {
+        try { return ytmCallOnce(ep, body); }
+        catch (IOException e) { Thread.sleep(300); return ytmCallOnce(ep, body); }
+    }
+
+    private String ytmCallOnce(String ep, JSONObject body) throws Exception {
         JSONObject client = new JSONObject();
         client.put("clientName", "WEB_REMIX");
         client.put("clientVersion", YTM_VER);
