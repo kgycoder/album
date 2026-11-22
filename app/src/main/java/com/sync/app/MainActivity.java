@@ -638,7 +638,9 @@ public class MainActivity extends AppCompatActivity {
     /* ════════ YouTube Music — 곡/아티스트/앨범 메타데이터, 상세 페이지, 연관곡(라디오) ════════
        응답은 searchResult 타입(같은 id)으로 돌려보내 JS 브릿지(__sync/callCs)를 그대로 쓴다.
        구조 파싱은 경로 고정 대신 렌더러 키를 재귀 탐색해 응답 구조 변경에 강하게 만들었다. */
-    private static final String YTM_VER = "1.20241127.01.00";
+    /* 클라이언트 버전이 너무 오래되면 YouTube Music 이 응답을 거부/축소할 수 있어, 항상 최근 날짜(7일 전)로 만든다. */
+    private static final String YTM_VER = "1." + new java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US)
+            .format(new java.util.Date(System.currentTimeMillis() - 7L * 86400000L)) + ".01.00";
     private static final Pattern YTM_DUR = Pattern.compile("^\\d{1,2}:\\d{2}(:\\d{2})?$");
     private static final Pattern YTM_YEAR = Pattern.compile("^(19|20)\\d{2}$");
     private static final Pattern YTM_TYPE = Pattern.compile(
@@ -894,9 +896,7 @@ public class MainActivity extends AppCompatActivity {
             String kind = msg.optString("kind", "song");
             String p = kind.equals("artist") ? "EgWKAQIgAWoMEA4QChADEAQQCRAF"
                      : kind.equals("album")  ? "EgWKAQIYAWoMEA4QChADEAQQCRAF"
-                     : kind.equals("video")  ? "EgWKAQIQAWoMEA4QChADEAQQCRAF"
                                              : "EgWKAQIIAWoMEA4QChADEAQQCRAF";
-            final String want = kind.equals("video") ? "song" : kind;   // 영상 항목도 곡과 같은 메타(아티스트/앨범/썸네일) 구조로 파싱됨
             JSONObject body = new JSONObject();
             body.put("query", msg.optString("query"));
             body.put("params", p);
@@ -906,7 +906,7 @@ public class MainActivity extends AppCompatActivity {
             for (Object o : ytmFind(doc, "musicResponsiveListItemRenderer")) {
                 if (!(o instanceof JSONObject)) continue;
                 JSONObject it = ytmList((JSONObject) o);
-                if (it == null || !it.optString("kind").equals(want)) continue;
+                if (it == null || !it.optString("kind").equals(kind)) continue;
                 if (!seen.add(it.optString("id"))) continue;
                 out.put(it);
                 if (out.length() >= 20) break;
