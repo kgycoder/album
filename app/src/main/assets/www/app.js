@@ -1495,7 +1495,7 @@ async function doSearch(query) {
                 t.artistId = t.artistId || (top[0] === 'album' ? pg.artistId : top[1].id);
             });
             const ids = new Set(own.map(t => t.id));
-            songs = [...own, ...songs.filter(t => !ids.has(t.id))].slice(0, 25);
+            songs = [...own, ...songs.filter(t => !ids.has(t.id))].slice(0, 60);
         } catch { }
     }
     const sid = new Set(songs.map(t => t.id));
