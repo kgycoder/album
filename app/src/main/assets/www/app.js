@@ -1480,10 +1480,13 @@ async function doSearch(query) {
     let songs = sr.status === 'fulfilled' ? (sr.value.items || []) : [];
     const artists = ar.status === 'fulfilled' ? (ar.value.items || []) : [];
     const albums = br.status === 'fulfilled' ? (br.value.items || []) : [];
-    /* 검색어가 아티스트/앨범 이름과 정확히 일치하면, 상세 페이지와 같은 "깨끗한 원곡 목록"을 곡 맨 위에 둔다 */
+    /* 검색어가 아티스트 이름과 정확히 일치하면, 상세 페이지와 같은 "깨끗한 원곡 목록"을 곡 맨 위에 둔다 */
     const nq = q.toLowerCase().replace(/\s+/g, '');
     const nm = x => (x?.name || '').toLowerCase().replace(/\s+/g, '');
-    const top = nm(artists[0]) === nq ? ['artist', artists[0]] : nm(albums[0]) === nq ? ['album', albums[0]] : null;
+    /* 앨범명은 곡 제목과 겹치는 경우가 많아(예: 같은 이름의 곡/앨범) 곡 검색 결과를 가리지 않도록 아티스트 이름 일치일 때만,
+       그리고 같은 제목의 곡이 검색 결과에 없을 때만 적용한다. */
+    const sameTitle = songs.some(t => (t.title || '').toLowerCase().replace(/\s+/g, '') === nq);
+    const top = !sameTitle && nm(artists[0]) === nq ? ['artist', artists[0]] : null;
     if (top) {
         try {
             const pg = await cachedCall({ type: 'musicBrowse', browseId: top[1].id });
