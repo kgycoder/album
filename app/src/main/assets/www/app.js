@@ -1296,6 +1296,14 @@ async function songSearch(q) {
     const r = await cachedCall({ type: 'search', query: q });
     return rankMusicResults(r.tracks || []);
 }
+/* 이미지 스켈레톤: .sk-img 는 로드 전 펄스(3회, 컴포지터 opacity 만), 로드되면 부드럽게 페이드인.
+   전역 capture 리스너 하나로 처리 → 카드별 리스너/타이머 없음. */
+document.addEventListener('load', e => { const t = e.target; if (t.classList?.contains('sk-img')) { t.classList.remove('er'); t.classList.add('ld'); } }, true);
+document.addEventListener('error', e => { const t = e.target; if (t.classList?.contains('sk-img')) t.classList.add('er'); }, true);
+function _skInit(root) {
+    root.querySelectorAll('img.sk-img').forEach(i => { if (i.complete && i.naturalWidth) i.classList.add('ld0'); });
+}
+function miPopClose() { document.getElementById('mi-pop')?.classList.remove('on'); }
 const _spin = '<div class="state"><div class="spinner"></div></div>';
 const _artSz = (u, n) => u ? u.replace(/=w\d+-h\d+/, `=w${n}-h${n}`) : '';
 
@@ -1369,15 +1377,17 @@ async function loadMadeForYou(rowId) {
 }
 function mkAlbumCard(a) {
     const el = document.createElement('div'); el.className = 'mi-al';
-    el.innerHTML = `<img class="mi-al-img" loading="lazy" decoding="async" src="${esc(_artSz(a.thumb, 300))}" alt="">
+    el.innerHTML = `<img class="mi-al-img sk-img" loading="lazy" decoding="async" src="${esc(_artSz(a.thumb, 300))}" alt="">
       <div class="mi-al-t">${esc(a.name)}</div><div class="mi-al-s">${esc([a.artist || a.sub, a.year].filter(Boolean).join(' · '))}</div>`;
+    _skInit(el);
     el.addEventListener('click', () => miOpen('album', a.id, { name: a.name, artist: a.artist }));
     return el;
 }
 function mkArtistCard(a) {
     const el = document.createElement('div'); el.className = 'mi-ac';
-    el.innerHTML = `<img class="mi-ac-img" loading="lazy" decoding="async" src="${esc(_artSz(a.thumb, 300))}" alt="">
+    el.innerHTML = `<img class="mi-ac-img sk-img" loading="lazy" decoding="async" src="${esc(_artSz(a.thumb, 300))}" alt="">
       <div class="mi-al-t">${esc(a.name)}</div>`;
+    _skInit(el);
     el.addEventListener('click', () => miOpen('artist', a.id, { name: a.name }));
     return el;
 }
@@ -1400,10 +1410,11 @@ function mkSongRow(t, playFn, numbered) {
     el.className = 'mi-row' + (S.track?.id === t.id ? ' playing' : '');
     el.dataset.id = t.id;
     const img = numbered ? `<span class="mi-no">${numbered}</span>`
-        : `<img class="mi-art" loading="lazy" decoding="async" src="${esc(t.art ? _artSz(t.art, 120) : getThumbMd(t.id))}" alt="">`;
+        : `<img class="mi-art sk-img" loading="lazy" decoding="async" src="${esc(t.art ? _artSz(t.art, 120) : getThumbMd(t.id))}" alt="">`;
     el.innerHTML = `${img}<div class="mi-tx"><div class="mi-t">${esc(t.title)}</div>
       <div class="mi-s">${esc([t.channel, t.album].filter(Boolean).join(' · '))}</div></div>
       <span class="mi-d">${t.dur ? fmt(t.dur) : ''}</span><button class="mi-more" aria-label="더보기">⋯</button>`;
+    if (!numbered) _skInit(el);
     if (!numbered) el.querySelector('.mi-art').onerror = function () { this.onerror = null; this.src = getThumbMd(t.id); };
     el.querySelector('.mi-more').addEventListener('click', e => { e.stopPropagation(); plShowCtxTrack(e, t); });
     el.addEventListener('click', playFn);
@@ -1452,6 +1463,7 @@ function _renderSearch(d) {
 }
 async function doSearch(query) {
     if (!query?.trim()) return;
+    miPopClose();
     gv('search', document.querySelector('[data-v="search"]'));
     const qi = document.getElementById('q-s'); if (qi) qi.value = query;
     clearTimeout(_sugTimer); _sugSeq++;          // 대기 중이거나 진행 중인 추천어 요청 취소
@@ -1461,17 +1473,30 @@ async function doSearch(query) {
     const area = document.getElementById('s-res');
     area.innerHTML = `<div class="state"><div class="spinner"></div><p style="margin-top:12px">검색 중...</p></div>`;
     _sStack.length = 0; _sRender = null; _miMode(false);
-    /* 영상 검색(기존 그대로: 쿼리에 키워드를 덧붙이지 않음)과 곡/아티스트/앨범 검색을 동시에 요청 */
+    /* 곡/아티스트/앨범 메타데이터 검색 + 기본 YouTube 검색을 동시에 요청.
+       메타데이터 1순위 곡의 정규 "아티스트 제목"으로 YouTube 를 한 번 더 검색해 영상 목록 위쪽에 두고,
+       기본 YouTube 검색 결과는 그 아래에 그대로 이어 붙인다. */
     const mq = kind => cachedCall({ type: 'musicSearch', kind, query: q }, 300000);
-    const [vr, sr, ar, br] = await Promise.allSettled([
-        cachedCall({ type: 'search', query: q }, 300000), mq('song'), mq('artist'), mq('album')]);
+    const pSong = mq('song');
+    const pMeta = pSong.then(r => {
+        const s0 = (r.items || [])[0]; if (!s0) return [];
+        const cq = [s0.channel, s0.title].filter(Boolean).join(' ').trim();
+        if (!cq || cq.toLowerCase() === q.toLowerCase()) return [];
+        return cachedCall({ type: 'search', query: cq }, 300000).then(v => v.tracks || []);
+    }).catch(() => []);
+    const [vr, sr, ar, br, mr] = await Promise.allSettled([
+        cachedCall({ type: 'search', query: q }, 300000), pSong, mq('artist'), mq('album'), pMeta]);
     const songs = sr.status === 'fulfilled' ? (sr.value.items || []) : [];
     const sid = new Set(songs.map(t => t.id));
+    const vids = [], seenV = new Set();
+    const addV = list => list.forEach(t => { if (t?.id && !sid.has(t.id) && !seenV.has(t.id)) { seenV.add(t.id); vids.push(t); } });
+    if (mr.status === 'fulfilled') addV(sortMusicFirst(mr.value).slice(0, 8));
+    if (vr.status === 'fulfilled') addV(sortMusicFirst(vr.value.tracks || []));
     const d = {
         songs,
         artists: ar.status === 'fulfilled' ? (ar.value.items || []) : [],
         albums: br.status === 'fulfilled' ? (br.value.items || []) : [],
-        videos: vr.status === 'fulfilled' ? sortMusicFirst(vr.value.tracks || []).filter(t => !sid.has(t.id)) : []
+        videos: vids
     };
     if (!d.songs.length && !d.artists.length && !d.albums.length && !d.videos.length) {
         const err = vr.status === 'rejected' ? vr.reason?.message : '';
@@ -1494,6 +1519,7 @@ async function _miFallback(kind, id, hint) {
 }
 async function miOpen(kind, id, hint) {
     if (!id) return;
+    miPopClose();
     gv('search', document.querySelector('[data-v="search"]'));
     if (document.getElementById('np')?.classList.contains('on')) closeNP();
     const area = document.getElementById('s-res');
@@ -1524,6 +1550,7 @@ function miPopup(title, text) {
     el.classList.add('on');
 }
 function miBack() {
+    miPopClose();
     const area = document.getElementById('s-res');
     _sRender = _sStack.pop() || null;
     if (_sRender) _sRender();
@@ -1538,14 +1565,15 @@ function miPlay(shuffle) {
 function _renderMiPage(kind, d) {
     _miMode(true);
     const area = document.getElementById('s-res'); area.innerHTML = '';
-    const isAl = kind === 'album', art = _artSz(d.thumb, 500);
+    const isAl = kind === 'album', art = _artSz(d.thumb, 400);
     const hd = document.createElement('div');
     const lnk = d.artistId && d.artist ? `<span class="mi-lnk" data-a="${esc(d.artistId)}">${esc(d.artist)}</span>` : esc(d.artist || '');
     const meta = isAl ? [lnk, esc(d.year || ''), esc(d.label || '')].filter(Boolean).join(' · ') : '';
     hd.innerHTML = `<div class="mi-back" onclick="miBack()">‹ 뒤로</div>
-      <div class="mi-hd ${isAl ? 'al' : 'ar'}"><img class="mi-hd-img" src="${esc(art)}" alt="">
+      <div class="mi-hd ${isAl ? 'al' : 'ar'}"><img class="mi-hd-img sk-img" decoding="async" src="${esc(art)}" alt="">
         <div class="mi-hd-tx"><h2>${esc(d.name || '')}</h2><p>${meta}</p>${!isAl && d.desc ? `<p class="mi-desc">${esc(d.desc)}</p><span class="mi-more-txt" style="display:none">더보기</span>` : ''}</div></div>
       <div class="mi-acts"><button class="mi-btn pri" onclick="miPlay(false)">▶ 재생</button><button class="mi-btn" onclick="miPlay(true)">셔플</button></div>`;
+    _skInit(hd);
     const ds = hd.querySelector('.mi-desc'), mt = hd.querySelector('.mi-more-txt');
     if (ds && mt) {
         mt.onclick = () => miPopup(d.name, d.desc);
@@ -2349,6 +2377,7 @@ function initSeekBar(barId, fillId) {
     }
     bar._setFill = (pct, instant) => {
         targetPct = pct;
+        if (!instant && !rafId && Math.abs(pct - animPct) < 2) instant = true;   // 재생 중 미세 이동은 보간 없이 즉시(연속 rAF 제거)
         if (instant) { animPct = pct; setPos(pct); if (rafId) { cancelAnimationFrame(rafId); rafId = null; } return; }
         if (!rafId) rafId = requestAnimationFrame(animStep);
     };
@@ -2398,11 +2427,12 @@ function startTick() {
             const ovb = document.getElementById('ov-pb');
             const lvpb = document.getElementById('np-lv-pb');
             if (!pb?.classList.contains('dragging')) pb?._setFill?.(pct);
-            if (!npb?.classList.contains('dragging')) npb?._setFill?.(pct);
+            const npVis = _npIsOpen() || NP_LS.active || LV.active;   // 안 보이는 NP/가사 화면은 갱신 생략
+            if (npVis && !npb?.classList.contains('dragging')) npb?._setFill?.(pct);
             if (OV.active && !ovb?.classList.contains('dragging')) ovb?._setFill?.(pct);
             if (LV.active && !lvpb?.classList.contains('dragging')) lvpb?._setFill?.(pct);
-            setT('p-cur', S.cur); setT('np-cur', S.cur);
-            setT('p-tot', S.dur); setT('np-tot', S.dur);
+            setT('p-cur', S.cur); setT('p-tot', S.dur);
+            if (npVis) { setT('np-cur', S.cur); setT('np-tot', S.dur); }
             if (OV.active) { setT('ov-p-cur', S.cur); setT('ov-p-tot', S.dur); }
             const bpf = document.getElementById('bar-prog-fill');
             if (bpf) bpf.style.width = pct.toFixed(2) + '%';
@@ -2416,6 +2446,11 @@ function stopTick() { clearInterval(S.ticker); }
    NOW PLAYING
 ════════════════════════════════════════════ */
 function openNP() {
+    miPopClose();
+    {   // 닫혀 있던 동안 건너뛴 진행바/시간 즉시 동기화
+        const pct = S.dur ? (S.cur / S.dur) * 100 : 0;
+        document.getElementById('np-pb')?._setFill?.(pct, true); setT('np-cur', S.cur); setT('np-tot', S.dur);
+    }
     document.getElementById('np').classList.add('on');
     _npIdleTick = 2;   // 일시정지 상태여도 열자마자 다음 틱에 메시를 한 번 그린다
     updFavBtn();
@@ -3038,6 +3073,7 @@ function renderQueue(force) {
    VIEWS / ROUTING
 ════════════════════════════════════════════ */
 function gv(v, el) {
+    miPopClose();
     document.querySelectorAll('.view').forEach(e => e.classList.remove('on'));
     document.getElementById('v-' + v)?.classList.add('on');
     document.querySelectorAll('.nb').forEach(e => e.classList.remove('on'));
