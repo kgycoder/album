@@ -890,6 +890,18 @@ public class MainActivity extends AppCompatActivity {
         } catch (JSONException ignored) {}
     }
 
+    private void ytmCollectSearch(JSONObject doc, String kind, boolean needAlbum, java.util.HashSet<String> seen, JSONArray out) throws JSONException {
+        for (Object o : ytmFind(doc, "musicResponsiveListItemRenderer")) {
+            if (!(o instanceof JSONObject)) continue;
+            JSONObject it = ytmList((JSONObject) o);
+            if (it == null || !it.optString("kind").equals(kind)) continue;
+            if (needAlbum && it.optString("albumId").isEmpty()) continue;
+            if (!seen.add(it.optString("id"))) continue;
+            out.put(it);
+            if (out.length() >= 20) break;
+        }
+    }
+
     private void doMusicSearch(JSONObject msg) {
         String id = msg.optString("id", "0");
         try {
@@ -900,17 +912,22 @@ public class MainActivity extends AppCompatActivity {
             JSONObject body = new JSONObject();
             body.put("query", msg.optString("query"));
             body.put("params", p);
-            JSONObject doc = new JSONObject(ytmCall("search", body));
             JSONArray out = new JSONArray();
             java.util.HashSet<String> seen = new java.util.HashSet<>();
-            for (Object o : ytmFind(doc, "musicResponsiveListItemRenderer")) {
-                if (!(o instanceof JSONObject)) continue;
-                JSONObject it = ytmList((JSONObject) o);
-                if (it == null || !it.optString("kind").equals(kind)) continue;
-                if (!seen.add(it.optString("id"))) continue;
-                out.put(it);
-                if (out.length() >= 20) break;
+            Exception firstErr = null;
+            try {
+                JSONObject doc = new JSONObject(ytmCall("search", body));
+                ytmCollectSearch(doc, kind, false, seen, out);
+            } catch (Exception e) { firstErr = e; }
+            if (out.length() == 0 && kind.equals("song")) {
+                /* 곡 필터 검색이 실패하거나 비면, 필터 없는 검색에서 앨범 정보가 있는 곡(=정식 음원)만 골라 쓴다 */
+                try {
+                    JSONObject b2 = new JSONObject();
+                    b2.put("query", msg.optString("query"));
+                    ytmCollectSearch(new JSONObject(ytmCall("search", b2)), kind, true, seen, out);
+                } catch (Exception e) { if (firstErr == null) firstErr = e; }
             }
+            if (out.length() == 0 && firstErr != null) throw firstErr;
             JSONObject res = new JSONObject();
             res.put("items", out);
             ytmSend(id, res, null);
