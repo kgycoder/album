@@ -1473,22 +1473,35 @@ async function doSearch(query) {
     const area = document.getElementById('s-res');
     area.innerHTML = `<div class="state"><div class="spinner"></div><p style="margin-top:12px">검색 중...</p></div>`;
     _sStack.length = 0; _sRender = null; _miMode(false);
-    /* 곡/아티스트/앨범과 같은 YouTube Music 메타데이터 검색(musicSearch)으로 영상 정보를 먼저 찾고,
-       기본 YouTube 검색 결과는 그 아래에 이어 붙인다. 별도의 검색 쿼리를 만들어 YouTube 에 보내지 않는다. */
+    /* 곡/아티스트/앨범은 YouTube Music 메타데이터(정제된 원곡)로, 영상은 기본 YouTube 검색으로 동시에 요청 */
     const mq = kind => cachedCall({ type: 'musicSearch', kind, query: q }, 300000);
-    const [vr, sr, ar, br, mr] = await Promise.allSettled([
-        cachedCall({ type: 'search', query: q }, 300000), mq('song'), mq('artist'), mq('album'), mq('video')]);
-    const songs = sr.status === 'fulfilled' ? (sr.value.items || []) : [];
+    const [vr, sr, ar, br] = await Promise.allSettled([
+        cachedCall({ type: 'search', query: q }, 300000), mq('song'), mq('artist'), mq('album')]);
+    let songs = sr.status === 'fulfilled' ? (sr.value.items || []) : [];
+    const artists = ar.status === 'fulfilled' ? (ar.value.items || []) : [];
+    const albums = br.status === 'fulfilled' ? (br.value.items || []) : [];
+    /* 검색어가 아티스트/앨범 이름과 정확히 일치하면, 상세 페이지와 같은 "깨끗한 원곡 목록"을 곡 맨 위에 둔다 */
+    const nq = q.toLowerCase().replace(/\s+/g, '');
+    const nm = x => (x?.name || '').toLowerCase().replace(/\s+/g, '');
+    const top = nm(artists[0]) === nq ? ['artist', artists[0]] : nm(albums[0]) === nq ? ['album', albums[0]] : null;
+    if (top) {
+        try {
+            const pg = await cachedCall({ type: 'musicBrowse', browseId: top[1].id });
+            const sec = (pg.sections || []).find(x => (x.items || []).some(t => t.kind === 'song'));
+            const own = (sec?.items || []).filter(t => t.kind === 'song');
+            own.forEach(t => {
+                if (top[0] === 'album') { t.art = t.art || pg.thumb; t.album = t.album || pg.name; t.albumId = t.albumId || pg.id; t.year = t.year || pg.year; }
+                t.channel = t.channel || (top[0] === 'album' ? pg.artist : pg.name);
+                t.artistId = t.artistId || (top[0] === 'album' ? pg.artistId : top[1].id);
+            });
+            const ids = new Set(own.map(t => t.id));
+            songs = [...own, ...songs.filter(t => !ids.has(t.id))].slice(0, 25);
+        } catch { }
+    }
     const sid = new Set(songs.map(t => t.id));
-    const vids = [], seenV = new Set();
-    const addV = list => list.forEach(t => { if (t?.id && !sid.has(t.id) && !seenV.has(t.id)) { seenV.add(t.id); vids.push(t); } });
-    if (mr.status === 'fulfilled') addV(mr.value.items || []);
-    if (vr.status === 'fulfilled') addV(sortMusicFirst(vr.value.tracks || []));
     const d = {
-        songs,
-        artists: ar.status === 'fulfilled' ? (ar.value.items || []) : [],
-        albums: br.status === 'fulfilled' ? (br.value.items || []) : [],
-        videos: vids
+        songs, artists, albums,
+        videos: vr.status === 'fulfilled' ? sortMusicFirst(vr.value.tracks || []).filter(t => !sid.has(t.id)) : []
     };
     if (!d.songs.length && !d.artists.length && !d.albums.length && !d.videos.length) {
         const err = vr.status === 'rejected' ? vr.reason?.message : '';
