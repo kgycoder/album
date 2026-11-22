@@ -1371,14 +1371,14 @@ function mkAlbumCard(a) {
     const el = document.createElement('div'); el.className = 'mi-al';
     el.innerHTML = `<img class="mi-al-img" loading="lazy" decoding="async" src="${esc(_artSz(a.thumb, 300))}" alt="">
       <div class="mi-al-t">${esc(a.name)}</div><div class="mi-al-s">${esc([a.artist || a.sub, a.year].filter(Boolean).join(' · '))}</div>`;
-    el.addEventListener('click', () => miOpen('album', a.id));
+    el.addEventListener('click', () => miOpen('album', a.id, { name: a.name, artist: a.artist }));
     return el;
 }
 function mkArtistCard(a) {
     const el = document.createElement('div'); el.className = 'mi-ac';
     el.innerHTML = `<img class="mi-ac-img" loading="lazy" decoding="async" src="${esc(_artSz(a.thumb, 300))}" alt="">
       <div class="mi-al-t">${esc(a.name)}</div>`;
-    el.addEventListener('click', () => miOpen('artist', a.id));
+    el.addEventListener('click', () => miOpen('artist', a.id, { name: a.name }));
     return el;
 }
 async function loadNewReleases(rowId) {
@@ -1484,7 +1484,15 @@ async function doSearch(query) {
 }
 
 /* ── 아티스트 / 앨범 상세 ── */
-async function miOpen(kind, id) {
+async function _miFallback(kind, id, hint) {
+    if (!hint?.name) return null;
+    const q = [hint.name, kind === 'album' ? hint.artist : ''].filter(Boolean).join(' ');
+    const r = await cachedCall({ type: 'musicSearch', kind, query: q }, 300000);
+    const nm = hint.name.trim().toLowerCase();
+    const it = (r.items || []).find(x => x.id !== id && (x.name || '').trim().toLowerCase() === nm);
+    return it ? cachedCall({ type: 'musicBrowse', browseId: it.id }) : null;
+}
+async function miOpen(kind, id, hint) {
     if (!id) return;
     gv('search', document.querySelector('[data-v="search"]'));
     if (document.getElementById('np')?.classList.contains('on')) closeNP();
@@ -1493,12 +1501,27 @@ async function miOpen(kind, id) {
     _sRender = null; _miMode(true);
     area.innerHTML = _spin;
     try {
-        const d = await cachedCall({ type: 'musicBrowse', browseId: id });
+        let d;
+        try { d = await cachedCall({ type: 'musicBrowse', browseId: id }); }
+        catch (e) { d = await _miFallback(kind, id, hint).catch(() => null); if (!d) throw e; }
         _sRender = () => _renderMiPage(kind, d);
         _sRender();
     } catch (e) {
         area.innerHTML = `<div class="mi-back" onclick="miBack()">‹ 뒤로</div><div class="state"><h3>불러오지 못했어요</h3><p>${esc(e.message)}</p></div>`;
     }
+}
+function miPopup(title, text) {
+    let el = document.getElementById('mi-pop');
+    if (!el) {
+        el = document.createElement('div'); el.id = 'mi-pop'; el.className = 'mi-pop';
+        el.innerHTML = '<div class="mi-pop-box"><div class="mi-pop-h"></div><div class="mi-pop-body"></div><button class="mi-btn pri" type="button">닫기</button></div>';
+        el.addEventListener('click', e => { if (e.target === el || e.target.tagName === 'BUTTON') el.classList.remove('on'); });
+        document.body.appendChild(el);
+    }
+    el.querySelector('.mi-pop-h').textContent = title || '';
+    el.querySelector('.mi-pop-body').textContent = text || '';
+    el.querySelector('.mi-pop-body').scrollTop = 0;
+    el.classList.add('on');
 }
 function miBack() {
     const area = document.getElementById('s-res');
@@ -1525,10 +1548,10 @@ function _renderMiPage(kind, d) {
       <div class="mi-acts"><button class="mi-btn pri" onclick="miPlay(false)">▶ 재생</button><button class="mi-btn" onclick="miPlay(true)">셔플</button></div>`;
     const ds = hd.querySelector('.mi-desc'), mt = hd.querySelector('.mi-more-txt');
     if (ds && mt) {
-        mt.onclick = () => { const o = ds.classList.toggle('open'); mt.textContent = o ? '접기' : '더보기'; };
+        mt.onclick = () => miPopup(d.name, d.desc);
         requestAnimationFrame(() => { if (ds.scrollHeight > ds.clientHeight + 1) mt.style.display = ''; });
     }
-    hd.querySelector('.mi-lnk')?.addEventListener('click', e => miOpen('artist', e.target.dataset.a));
+    hd.querySelector('.mi-lnk')?.addEventListener('click', e => miOpen('artist', e.target.dataset.a, { name: e.target.textContent }));
     area.appendChild(hd);
     _miTracks = [];
     (d.sections || []).forEach(sec => {
@@ -1554,11 +1577,11 @@ function _renderMiPage(kind, d) {
 /* ── 재생 중 곡 정보(아티스트/앨범) + 연관곡 자동 이어붙이기 ── */
 function miSetNpMeta(t) {
     const ch = document.getElementById('np-ch'), al = document.getElementById('np-album');
-    if (ch) { ch.classList.toggle('mi-lnk', !!t.artistId); ch.onclick = t.artistId ? () => miOpen('artist', t.artistId) : null; }
+    if (ch) { ch.classList.toggle('mi-lnk', !!t.artistId); ch.onclick = t.artistId ? () => miOpen('artist', t.artistId, { name: t.channel }) : null; }
     if (al) {
         const on = !!(t.album && t.albumId);
         al.textContent = on ? t.album + (t.year ? ' · ' + t.year : '') : '';
-        al.onclick = on ? () => miOpen('album', t.albumId) : null;
+        al.onclick = on ? () => miOpen('album', t.albumId, { name: t.album, artist: t.channel }) : null;
         al.style.display = on ? '' : 'none';
     }
 }
@@ -4858,8 +4881,10 @@ window.__onAndroidBack = function() {
     if (NP_LS.active) { _exitNpLandscape(); return; }
     // Lyrics View가 열려 있으면 먼저 닫고 기본 화면으로 복귀
     if (LV.active) { closeLyricsView(); return; }
+    if (document.getElementById('mi-pop')?.classList.contains('on')) { document.getElementById('mi-pop').classList.remove('on'); return; }
     const np = document.getElementById('np');
     if (np && np.classList.contains('on')) { closeNP(); return; }
+    if (document.getElementById('s-res')?.parentElement?.classList.contains('mi-page')) { miBack(); return; }
     if (document.getElementById('pl-dialog-overlay')?.classList.contains('on')) { plDialogCancel(); return; }
     if (document.getElementById('pl-confirm-overlay')?.classList.contains('on')) { plConfirmCancel(); return; }
     if (document.getElementById('pl-add-modal-overlay')?.classList.contains('on')) { plAddModalClose(); return; }
