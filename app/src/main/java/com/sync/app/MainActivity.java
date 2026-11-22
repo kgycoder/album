@@ -894,7 +894,9 @@ public class MainActivity extends AppCompatActivity {
             String kind = msg.optString("kind", "song");
             String p = kind.equals("artist") ? "EgWKAQIgAWoMEA4QChADEAQQCRAF"
                      : kind.equals("album")  ? "EgWKAQIYAWoMEA4QChADEAQQCRAF"
+                     : kind.equals("video")  ? "EgWKAQIQAWoMEA4QChADEAQQCRAF"
                                              : "EgWKAQIIAWoMEA4QChADEAQQCRAF";
+            final String want = kind.equals("video") ? "song" : kind;   // 영상 항목도 곡과 같은 메타(아티스트/앨범/썸네일) 구조로 파싱됨
             JSONObject body = new JSONObject();
             body.put("query", msg.optString("query"));
             body.put("params", p);
@@ -904,7 +906,7 @@ public class MainActivity extends AppCompatActivity {
             for (Object o : ytmFind(doc, "musicResponsiveListItemRenderer")) {
                 if (!(o instanceof JSONObject)) continue;
                 JSONObject it = ytmList((JSONObject) o);
-                if (it == null || !it.optString("kind").equals(kind)) continue;
+                if (it == null || !it.optString("kind").equals(want)) continue;
                 if (!seen.add(it.optString("id"))) continue;
                 out.put(it);
                 if (out.length() >= 20) break;
