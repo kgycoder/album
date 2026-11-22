@@ -1473,24 +1473,16 @@ async function doSearch(query) {
     const area = document.getElementById('s-res');
     area.innerHTML = `<div class="state"><div class="spinner"></div><p style="margin-top:12px">검색 중...</p></div>`;
     _sStack.length = 0; _sRender = null; _miMode(false);
-    /* 곡/아티스트/앨범 메타데이터 검색 + 기본 YouTube 검색을 동시에 요청.
-       메타데이터 1순위 곡의 정규 "아티스트 제목"으로 YouTube 를 한 번 더 검색해 영상 목록 위쪽에 두고,
-       기본 YouTube 검색 결과는 그 아래에 그대로 이어 붙인다. */
+    /* 곡/아티스트/앨범과 같은 YouTube Music 메타데이터 검색(musicSearch)으로 영상 정보를 먼저 찾고,
+       기본 YouTube 검색 결과는 그 아래에 이어 붙인다. 별도의 검색 쿼리를 만들어 YouTube 에 보내지 않는다. */
     const mq = kind => cachedCall({ type: 'musicSearch', kind, query: q }, 300000);
-    const pSong = mq('song');
-    const pMeta = pSong.then(r => {
-        const s0 = (r.items || [])[0]; if (!s0) return [];
-        const cq = [s0.channel, s0.title].filter(Boolean).join(' ').trim();
-        if (!cq || cq.toLowerCase() === q.toLowerCase()) return [];
-        return cachedCall({ type: 'search', query: cq }, 300000).then(v => v.tracks || []);
-    }).catch(() => []);
     const [vr, sr, ar, br, mr] = await Promise.allSettled([
-        cachedCall({ type: 'search', query: q }, 300000), pSong, mq('artist'), mq('album'), pMeta]);
+        cachedCall({ type: 'search', query: q }, 300000), mq('song'), mq('artist'), mq('album'), mq('video')]);
     const songs = sr.status === 'fulfilled' ? (sr.value.items || []) : [];
     const sid = new Set(songs.map(t => t.id));
     const vids = [], seenV = new Set();
     const addV = list => list.forEach(t => { if (t?.id && !sid.has(t.id) && !seenV.has(t.id)) { seenV.add(t.id); vids.push(t); } });
-    if (mr.status === 'fulfilled') addV(sortMusicFirst(mr.value).slice(0, 8));
+    if (mr.status === 'fulfilled') addV(mr.value.items || []);
     if (vr.status === 'fulfilled') addV(sortMusicFirst(vr.value.tracks || []));
     const d = {
         songs,
