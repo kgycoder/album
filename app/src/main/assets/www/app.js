@@ -1503,7 +1503,10 @@ async function doSearch(query) {
         tseen.add(t.id); topic.push({ ...t, channel: art, _official: true });
     }));
     const tn = t => (t.title || '').toLowerCase().replace(/\s+/g, '');
-    topic.sort((x, y) => (tn(y) === nq) - (tn(x) === nq));
+    /* 신뢰도: 제목 정확 일치 우선 → 조회수 높은 순. 같은 이름의 무명 곡(최상위 대비 2% 미만 조회수)은 제외 */
+    topic.sort((x, y) => (tn(y) === nq) - (tn(x) === nq) || (y.views || 0) - (x.views || 0));
+    const tv = topic.length ? (topic[0].views || 0) : 0;
+    if (tv > 0) { const keep = topic.filter(t => (t.views || 0) >= tv * 0.02); topic.length = 0; topic.push(...keep); }
     songs = [...songs, ...topic].slice(0, 40);
     const needAlb = false;
     let metaErr = '';
