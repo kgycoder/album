@@ -666,14 +666,11 @@ public class MainActivity extends AppCompatActivity {
     /* ════════ YouTube Music — 곡/아티스트/앨범 메타데이터, 상세 페이지, 연관곡(라디오) ════════
        응답은 searchResult 타입(같은 id)으로 돌려보내 JS 브릿지(__sync/callCs)를 그대로 쓴다.
        구조 파싱은 경로 고정 대신 렌더러 키를 재귀 탐색해 응답 구조 변경에 강하게 만들었다. */
-    /* 클라이언트 버전이 너무 오래되면 YouTube Music 이 응답을 거부/축소할 수 있어, 항상 최근 날짜(7일 전)로 만든다. */
-    private static final String YTM_VER = "1." + new java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US)
-            .format(new java.util.Date(System.currentTimeMillis() - 7L * 86400000L)) + ".01.00";
-    private static final Pattern YTM_DUR = Pattern.compile("^\\d{1,2}:\\d{2}(:\\d{2})?$");
-    private static final Pattern YTM_YEAR = Pattern.compile("^(19|20)\\d{2}$");
+    /* 날짜로 만든 "최신" 버전은 서버가 알 수 없는 값이라 곡/영상 검색이 빈 응답으로 오는 것이 확인됨 → 실제 동작이 확인된 고정 버전 사용 */
+    private static final String YTM_VER = "1.20250310.01.00";
     /** 현재 사용 중인 클라이언트 버전(검색이 비면 다른 버전으로 자동 전환 후 성공한 값을 유지) */
     private volatile String ytmVer = YTM_VER;
-    private static final String[] YTM_ALT_VERS = { "1.20250310.01.00", "1.20241127.01.00", "1.20250901.01.00" };
+    private static final String[] YTM_ALT_VERS = { "1.20241127.01.00", "1.20250901.01.00" };
     private static final Pattern YTM_TYPE = Pattern.compile(
             "^(곡|노래|동영상|앨범|싱글|EP|아티스트|재생목록|Song|Video|Album|Single|Artist|Playlist)$",
             Pattern.CASE_INSENSITIVE);
