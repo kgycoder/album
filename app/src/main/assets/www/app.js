@@ -1452,7 +1452,7 @@ function _renderSearch(d) {
         d.albums.slice(0, 12).forEach(a => r.appendChild(mkAlbumCard(a))); area.appendChild(r);
     }
     if (d.songs.length || d.metaErr) {
-        _sHead(area, d.metaErr ? '곡 (메타데이터 검색 실패: ' + d.metaErr + ')' : '곡');   // 실패 원인을 화면에 표시
+        _sHead(area, d.metaErr ? '곡 (YouTube Music 곡 검색 비어있음: ' + d.metaErr + ')' : '곡');   // 실패 원인을 화면에 표시
         area.appendChild(_songList(d.songs, false));
     }
     if (d.videos.length) {
@@ -1478,39 +1478,48 @@ async function doSearch(query) {
     _sStack.length = 0; _sRender = null; _miMode(false);
     /* 곡/아티스트/앨범은 YouTube Music 메타데이터(정제된 원곡)로, 영상은 기본 YouTube 검색으로 동시에 요청 */
     const mq = kind => cachedCall({ type: 'musicSearch', kind, query: q }, 300000);
-    const [vr, sr, ar, br, tr] = await Promise.allSettled([
-        cachedCall({ type: 'search', query: q }, 300000), mq('song'), mq('artist'), mq('album'),
-        cachedCall({ type: 'search', query: q + ' topic' }, 300000)]);
+    const [vr, sr, ar, br] = await Promise.allSettled([
+        cachedCall({ type: 'search', query: q }, 300000), mq('song'), mq('artist'), mq('album')]);
     let songs = sr.status === 'fulfilled' ? (sr.value.items || []) : [];
     /* 곡은 앨범/싱글/EP 에 속한 정식 음원만. 일반 YouTube 검색 결과로 대신 채우지 않는다. */
     const artists = ar.status === 'fulfilled' ? (ar.value.items || []) : [];
     const albums = br.status === 'fulfilled' ? (br.value.items || []) : [];
     const rawN = songs.length;
-    songs = songs.filter(t => t.albumId);
     const nq = q.toLowerCase().replace(/\s+/g, '');
     const nm = x => (x?.name || '').toLowerCase().replace(/\s+/g, '');
     const sameTitle = songs.some(t => (t.title || '').toLowerCase().replace(/\s+/g, '') === nq);
     const topArtist = !sameTitle && nm(artists[0]) === nq ? artists[0] : null;
-    /* 공식 음원 = 유튜브가 앨범 음원으로 자동 생성한 "아티스트 - Topic" 채널의 곡. 제목/아티스트에 검색어가 모두 들어 있는 것만 사용 */
+    /* 곡의 1순위 출처는 YouTube Music 곡 검색(자체 랭킹·오타 보정). 결과가 부족(5개 미만)할 때만
+       일반 검색 결과에서 공식 음원("- Topic")과 음원으로 보이는 영상(커버/편집 제외)을 검색어 일치 조건으로 보충한다. */
+    const ytmSongs = songs.slice();
     const qw = q.toLowerCase().split(/\s+/).filter(Boolean);
     const topicRe = /\s*-\s*topic\s*$/i;
-    const topic = [], tseen = new Set(songs.map(t => t.id));
-    [vr, tr].forEach(r => (r.status === 'fulfilled' ? (r.value.tracks || []) : []).forEach(t => {
-        if (!t?.id || tseen.has(t.id) || !topicRe.test(t.channel || '')) return;
-        const art = t.channel.replace(topicRe, '').trim();
-        const h = ((t.title || '') + art).toLowerCase().replace(/\s+/g, '');
-        if (!qw.every(w => h.includes(w))) return;
-        tseen.add(t.id); topic.push({ ...t, channel: art, _official: true });
-    }));
     const tn = t => (t.title || '').toLowerCase().replace(/\s+/g, '');
-    /* 신뢰도: 제목 정확 일치 우선 → 조회수 높은 순. 같은 이름의 무명 곡(최상위 대비 2% 미만 조회수)은 제외 */
-    topic.sort((x, y) => (tn(y) === nq) - (tn(x) === nq) || (y.views || 0) - (x.views || 0));
-    const tv = topic.length ? (topic[0].views || 0) : 0;
-    if (tv > 0) { const keep = topic.filter(t => (t.views || 0) >= tv * 0.02); topic.length = 0; topic.push(...keep); }
-    songs = [...songs, ...topic].slice(0, 40);
-    const needAlb = false;
+    const pick = tracks => {
+        const topic = [], other = [];
+        tracks.forEach(t => {
+            if (!t?.id) return;
+            const isT = topicRe.test(t.channel || '');
+            const art = (t.channel || '').replace(topicRe, '').trim();
+            const h = ((t.title || '') + art).toLowerCase().replace(/\s+/g, '');
+            if (!qw.every(w => h.includes(w))) return;
+            if (isT) topic.push({ ...t, channel: art });
+            else if (searchMusicScore(t) >= 0) other.push(t);
+        });
+        topic.sort((x, y) => (tn(y) === nq) - (tn(x) === nq) || (y.views || 0) - (x.views || 0));
+        const tv = topic.length ? (topic[0].views || 0) : 0;
+        const tk = tv > 0 ? topic.filter(t => (t.views || 0) >= tv * 0.02) : topic;
+        return [...tk, ...sortMusicFirst(other)];
+    };
+    const merge = (base, extra) => {
+        const seen = new Set(base.map(t => t.id)), res = base.slice();
+        extra.forEach(t => { if (!seen.has(t.id)) { seen.add(t.id); res.push(t); } });
+        return res.slice(0, 40);
+    };
+    if (ytmSongs.length < 5 && vr.status === 'fulfilled') songs = merge(ytmSongs, pick(vr.value.tracks || []));
+    const needAlb = false, needMore = ytmSongs.length < 5;
     let metaErr = '';
-    if (!songs.length) metaErr = sr.status === 'rejected' ? (sr.reason?.message || '오류') : ('결과 없음(' + rawN + ') ' + (sr.value?.dbg || ''));
+    if (!ytmSongs.length) metaErr = sr.status === 'rejected' ? (sr.reason?.message || '오류') : ('결과 없음(' + rawN + ') ' + (sr.value?.dbg || ''));
     /* 추가 보강(아티스트 곡 목록 / 앨범 수록곡)은 화면을 막지 않고 백그라운드에서 수행 → 끝나면 곡 섹션만 갱신 */
     const enrich = async () => {
         const out = songs.slice();
@@ -1535,13 +1544,15 @@ async function doSearch(query) {
             pgs.forEach(r => { if (r.status === 'fulfilled') songsOf(r.value).forEach(t => { fill(r.value, t, true); if (rel(t)) tail.push(t); }); });
         }
         tail.sort((x, y) => (tt2(y) === nq) - (tt2(x) === nq));   // 제목이 검색어와 정확히 같은 곡 우선
+        let more = [];
+        if (needMore) { const tr = await cachedCall({ type: 'search', query: q + ' topic' }, 300000).catch(() => null); if (tr) more = pick(tr.tracks || []); }
         const seen = new Set(), res = [];
-        [...head, ...out, ...tail].forEach(t => { if (t?.id && !seen.has(t.id)) { seen.add(t.id); res.push(t); } });
+        [...head, ...out, ...tail, ...more].forEach(t => { if (t?.id && !seen.has(t.id)) { seen.add(t.id); res.push(t); } });
         return res.slice(0, 60);
     };
     const sid = new Set(songs.map(t => t.id));
     const d = {
-        songs, artists, albums, metaErr: songs.length ? '' : metaErr,
+        songs, artists, albums, metaErr: ytmSongs.length ? '' : metaErr,
         videos: vr.status === 'fulfilled' ? sortMusicFirst(vr.value.tracks || []).filter(t => !sid.has(t.id)) : []
     };
     if (!d.songs.length && !d.artists.length && !d.albums.length && !d.videos.length) {
@@ -1552,7 +1563,7 @@ async function doSearch(query) {
     }
     const myRender = () => _renderSearch(d);
     _sRender = myRender; myRender();
-    if (topArtist || needAlb) enrich().then(ns => {
+    if (topArtist || needAlb || needMore) enrich().then(ns => {
         if (_sRender !== myRender || ns.length === d.songs.length) return;   // 다른 화면으로 이동했거나 변화 없음
         d.songs = ns;
         const ids = new Set(ns.map(t => t.id));
