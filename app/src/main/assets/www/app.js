@@ -1491,7 +1491,10 @@ async function doSearch(query) {
     const topArtist = !sameTitle && nm(artists[0]) === nq ? artists[0] : null;
     /* 곡의 1순위 출처는 YouTube Music 곡 검색(자체 랭킹·오타 보정). 결과가 부족(5개 미만)할 때만
        일반 검색 결과에서 공식 음원("- Topic")과 음원으로 보이는 영상(커버/편집 제외)을 검색어 일치 조건으로 보충한다. */
-    const ytmSongs = songs.slice();
+    /* 공식 음원 = 앨범/싱글/EP 에 속한 곡(albumId 있음). 앨범 정보 없는 업로드/일반 영상형 곡은 공식 곡이 하나도 없을 때만 사용 */
+    const official = songs.filter(t => t.albumId);
+    const ytmSongs = official.length ? official : songs;
+    songs = ytmSongs.slice();
     const qw = q.toLowerCase().split(/\s+/).filter(Boolean);
     const topicRe = /\s*-\s*topic\s*$/i;
     const tn = t => (t.title || '').toLowerCase().replace(/\s+/g, '');
@@ -1504,12 +1507,11 @@ async function doSearch(query) {
             const h = ((t.title || '') + art).toLowerCase().replace(/\s+/g, '');
             if (!qw.every(w => h.includes(w))) return;
             if (isT) topic.push({ ...t, channel: art });
-            else if (searchMusicScore(t) >= 0) other.push(t);
         });
         topic.sort((x, y) => (tn(y) === nq) - (tn(x) === nq) || (y.views || 0) - (x.views || 0));
         const tv = topic.length ? (topic[0].views || 0) : 0;
         const tk = tv > 0 ? topic.filter(t => (t.views || 0) >= tv * 0.02) : topic;
-        return [...tk, ...sortMusicFirst(other)];
+        return tk;   // 공식(Topic) 음원만. 일반 영상은 곡 목록에 넣지 않는다
     };
     const merge = (base, extra) => {
         const seen = new Set(base.map(t => t.id)), res = base.slice();
