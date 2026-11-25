@@ -1484,7 +1484,7 @@ async function doSearch(query) {
     /* 메타데이터 곡 검색이 실패하거나 비면, 기본 검색 결과에서 음악으로 보이는 항목을 곡으로 대신 보여준다(곡 섹션이 비지 않도록) */
     let metaErr = '';
     if (!songs.length && vr.status === 'fulfilled') {
-        metaErr = sr.status === 'rejected' ? (sr.reason?.message || '오류') : '결과 없음';
+        metaErr = sr.status === 'rejected' ? (sr.reason?.message || '오류') : ('결과 없음 ' + (sr.value?.dbg || ''));
         songs = rankMusicResults(vr.value.tracks || []).slice(0, 15);
     }
     const artists = ar.status === 'fulfilled' ? (ar.value.items || []) : [];
