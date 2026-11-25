@@ -671,6 +671,8 @@ public class MainActivity extends AppCompatActivity {
     /** 현재 사용 중인 클라이언트 버전(검색이 비면 다른 버전으로 자동 전환 후 성공한 값을 유지) */
     private volatile String ytmVer = YTM_VER;
     private static final String[] YTM_ALT_VERS = { "1.20241127.01.00", "1.20250901.01.00" };
+    private static final Pattern YTM_DUR = Pattern.compile("^\\d{1,2}:\\d{2}(:\\d{2})?$");
+    private static final Pattern YTM_YEAR = Pattern.compile("^(19|20)\\d{2}$");
     private static final Pattern YTM_TYPE = Pattern.compile(
             "^(곡|노래|동영상|앨범|싱글|EP|아티스트|재생목록|Song|Video|Album|Single|Artist|Playlist)$",
             Pattern.CASE_INSENSITIVE);
