@@ -950,11 +950,19 @@ public class MainActivity extends AppCompatActivity {
             try {
                 JSONObject doc = new JSONObject(ytmCall("search", body));
                 ytmCollectSearch(doc, kind, false, seen, out);
-                if (out.length() == 0) {   // 진단용: 응답 구조 요약
-                    StringBuilder ks = new StringBuilder();
-                    java.util.Iterator<String> ki = doc.keys();
-                    while (ki.hasNext()) ks.append(ki.next()).append(',');
-                    dbg = "렌더러=" + ytmFind(doc, "musicResponsiveListItemRenderer").size() + " 키=" + ks + " 길이=" + doc.toString().length();
+                {   // 진단용: 응답 구조 요약 (렌더러 수 / 파싱 성공 수 / 종류별 개수 / 앞 3개 샘플)
+                    int rc = 0, ok = 0; int nSong = 0, nAlb = 0, nArt = 0; StringBuilder smp = new StringBuilder();
+                    for (Object o : ytmFind(doc, "musicResponsiveListItemRenderer")) {
+                        rc++;
+                        if (!(o instanceof JSONObject)) continue;
+                        JSONObject it = ytmList((JSONObject) o);
+                        if (it == null) continue;
+                        ok++;
+                        String k = it.optString("kind");
+                        if (k.equals("song")) nSong++; else if (k.equals("album")) nAlb++; else if (k.equals("artist")) nArt++;
+                        if (smp.length() < 150) smp.append(k).append(':').append(it.optString("title", it.optString("name"))).append(it.optString("albumId").isEmpty() ? "" : "[앨범]").append(" / ");
+                    }
+                    dbg = "v=" + ytmVer + " 렌더러=" + rc + " 파싱=" + ok + " 곡=" + nSong + " 앨범=" + nAlb + " 아티스트=" + nArt + " 샘플=" + smp;
                 }
             } catch (Exception e) { firstErr = e; dbg = "오류=" + e.getMessage(); }
             if (out.length() == 0) {
@@ -973,7 +981,7 @@ public class MainActivity extends AppCompatActivity {
             if (out.length() == 0 && firstErr != null) throw firstErr;
             JSONObject res = new JSONObject();
             res.put("items", out);
-            if (out.length() == 0) res.put("dbg", dbg);
+            res.put("dbg", dbg);
             ytmSend(id, res, null);
         } catch (Exception e) { ytmSend(id, null, String.valueOf(e.getMessage())); }
     }
