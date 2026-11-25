@@ -915,21 +915,29 @@ public class MainActivity extends AppCompatActivity {
             JSONArray out = new JSONArray();
             java.util.HashSet<String> seen = new java.util.HashSet<>();
             Exception firstErr = null;
+            String dbg = "";
             try {
                 JSONObject doc = new JSONObject(ytmCall("search", body));
                 ytmCollectSearch(doc, kind, false, seen, out);
-            } catch (Exception e) { firstErr = e; }
+                if (out.length() == 0) {   // 진단용: 응답 구조 요약
+                    StringBuilder ks = new StringBuilder();
+                    java.util.Iterator<String> ki = doc.keys();
+                    while (ki.hasNext()) ks.append(ki.next()).append(',');
+                    dbg = "렌더러=" + ytmFind(doc, "musicResponsiveListItemRenderer").size() + " 키=" + ks + " 길이=" + doc.toString().length();
+                }
+            } catch (Exception e) { firstErr = e; dbg = "오류=" + e.getMessage(); }
             if (out.length() == 0 && kind.equals("song")) {
                 /* 곡 필터 검색이 실패하거나 비면, 필터 없는 검색에서 앨범 정보가 있는 곡(=정식 음원)만 골라 쓴다 */
                 try {
                     JSONObject b2 = new JSONObject();
                     b2.put("query", msg.optString("query"));
-                    ytmCollectSearch(new JSONObject(ytmCall("search", b2)), kind, true, seen, out);
+                    ytmCollectSearch(new JSONObject(ytmCall("search", b2)), kind, false, seen, out);
                 } catch (Exception e) { if (firstErr == null) firstErr = e; }
             }
             if (out.length() == 0 && firstErr != null) throw firstErr;
             JSONObject res = new JSONObject();
             res.put("items", out);
+            if (out.length() == 0) res.put("dbg", dbg);
             ytmSend(id, res, null);
         } catch (Exception e) { ytmSend(id, null, String.valueOf(e.getMessage())); }
     }
