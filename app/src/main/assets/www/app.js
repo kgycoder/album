@@ -1507,12 +1507,16 @@ async function doSearch(query) {
             if (pg) head = songsOf(pg).map(t => (fill(pg, t, false), t));
         }
         const tail = [];
+        const tt2 = t => (t.title || '').toLowerCase().replace(/\s+/g, '');
         if (needAlb) {
             const qw = q.toLowerCase().split(/\s+/).filter(Boolean);
-            const rel = t => { const h = ((t.title || '') + (t.channel || '') + (t.album || '')).toLowerCase().replace(/\s+/g, ''); return qw.every(w => h.includes(w)); };
+            /* 앨범명은 비교 대상에서 제외(앨범명이 검색어와 같으면 수록곡 전체가 딸려오므로) — 곡 제목/아티스트만 */
+            const rel = t => { const h = ((t.title || '') + (t.channel || '')).toLowerCase().replace(/\s+/g, ''); return qw.every(w => h.includes(w)); };
+            const tt = t => (t.title || '').toLowerCase().replace(/\s+/g, '');
             const pgs = await Promise.allSettled(albums.slice(0, 4).map(a => cachedCall({ type: 'musicBrowse', browseId: a.id })));
             pgs.forEach(r => { if (r.status === 'fulfilled') songsOf(r.value).forEach(t => { fill(r.value, t, true); if (rel(t)) tail.push(t); }); });
         }
+        tail.sort((x, y) => (tt2(y) === nq) - (tt2(x) === nq));   // 제목이 검색어와 정확히 같은 곡 우선
         const seen = new Set(), res = [];
         [...head, ...out, ...tail].forEach(t => { if (t?.id && !seen.has(t.id)) { seen.add(t.id); res.push(t); } });
         return res.slice(0, 60);
