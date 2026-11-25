@@ -548,6 +548,11 @@ public class MainActivity extends AppCompatActivity {
                 } catch (JSONException ignored2) {}
 
                 int dur = parseDur(durStr);
+                long views = 0;
+                try {
+                    if (vr.has("viewCountText"))
+                        views = parseViews(vr.getJSONObject("viewCountText").optString("simpleText", ""));
+                } catch (JSONException ignored3) {}
                 // 과거에는 자체 키워드 휴리스틱(isMusicVideo)으로 결과를
                 // 한 번 더 걸러냈지만, 이는 실제 유튜브에는 존재하는
                 // 음악 영상이 SYNC 검색에는 나오지 않는 원인이었다.
@@ -560,6 +565,7 @@ public class MainActivity extends AppCompatActivity {
                 t.put("title", title);
                 t.put("channel", ch);
                 t.put("dur", dur);
+                t.put("views", views);   // 인기도(신뢰도) 정렬용
                 t.put("thumb", "https://i.ytimg.com/vi/" + vid + "/mqdefault.jpg");
                 list.put(t);
             }
@@ -575,6 +581,28 @@ public class MainActivity extends AppCompatActivity {
                 return obj.getJSONArray("runs").getJSONObject(0).optString("text", "");
             return obj.optString("simpleText", "");
         } catch (JSONException e) { return ""; }
+    }
+
+    /** "조회수 1.2억회", "조회수 3,456회", "1.2M views" → 숫자 */
+    private long parseViews(String s) {
+        if (s == null) return 0;
+        java.util.regex.Matcher m = Pattern.compile("([0-9][0-9,]*\\.?[0-9]*)\\s*(억|만|천|[KkMmBb])?").matcher(s);
+        if (!m.find()) return 0;
+        try {
+            double v = Double.parseDouble(m.group(1).replace(",", ""));
+            String u = m.group(2);
+            if (u != null) {
+                switch (u) {
+                    case "억": v *= 1e8; break;
+                    case "만": v *= 1e4; break;
+                    case "천": v *= 1e3; break;
+                    case "K": case "k": v *= 1e3; break;
+                    case "M": case "m": v *= 1e6; break;
+                    case "B": case "b": v *= 1e9; break;
+                }
+            }
+            return (long) v;
+        } catch (Exception e) { return 0; }
     }
 
     private int parseDur(String s) {
