@@ -1451,7 +1451,7 @@ function _renderSearch(d) {
         const r = document.createElement('div'); r.className = 'hrow';
         d.albums.slice(0, 12).forEach(a => r.appendChild(mkAlbumCard(a))); area.appendChild(r);
     }
-    if (d.songs.length) {
+    if (d.songs.length || d.metaErr) {
         _sHead(area, d.metaErr ? '곡 (메타데이터 검색 실패: ' + d.metaErr + ')' : '곡');   // 실패 원인을 화면에 표시
         area.appendChild(_songList(d.songs, false));
     }
@@ -1481,14 +1481,29 @@ async function doSearch(query) {
     const [vr, sr, ar, br] = await Promise.allSettled([
         cachedCall({ type: 'search', query: q }, 300000), mq('song'), mq('artist'), mq('album')]);
     let songs = sr.status === 'fulfilled' ? (sr.value.items || []) : [];
-    /* 메타데이터 곡 검색이 실패하거나 비면, 기본 검색 결과에서 음악으로 보이는 항목을 곡으로 대신 보여준다(곡 섹션이 비지 않도록) */
-    let metaErr = '';
-    if (!songs.length && vr.status === 'fulfilled') {
-        metaErr = sr.status === 'rejected' ? (sr.reason?.message || '오류') : ('결과 없음 ' + (sr.value?.dbg || ''));
-        songs = rankMusicResults(vr.value.tracks || []).slice(0, 15);
+    /* 곡은 앨범/싱글/EP 에 속한 정식 음원만. 일반 YouTube 검색 결과로 대신 채우지 않는다. */
+    const rawN = songs.length;
+    songs = songs.filter(t => t.albumId);
+    const qw = q.toLowerCase().split(/\s+/).filter(Boolean);
+    const rel = t => { const h = ((t.title || '') + (t.channel || '') + (t.album || '')).toLowerCase().replace(/\s+/g, ''); return qw.every(w => h.includes(w)); };
+    /* 곡 검색에서 정식 음원이 부족하면, 검색된 앨범/싱글/EP 의 수록곡 중 검색어와 맞는 곡을 보충 */
+    if (songs.length < 3 && albums.length) {
+        const pgs = await Promise.allSettled(albums.slice(0, 4).map(a => cachedCall({ type: 'musicBrowse', browseId: a.id })));
+        const extra = [];
+        pgs.forEach(r => {
+            if (r.status !== 'fulfilled') return;
+            const pg = r.value, sec = (pg.sections || []).find(x => (x.items || []).some(t => t.kind === 'song'));
+            (sec?.items || []).filter(t => t.kind === 'song').forEach(t => {
+                t.art = t.art || pg.thumb; t.album = t.album || pg.name; t.albumId = t.albumId || pg.id; t.year = t.year || pg.year;
+                t.channel = t.channel || pg.artist; t.artistId = t.artistId || pg.artistId;
+                if (rel(t)) extra.push(t);
+            });
+        });
+        const have = new Set(songs.map(t => t.id));
+        extra.forEach(t => { if (!have.has(t.id)) { have.add(t.id); songs.push(t); } });
     }
-    const artists = ar.status === 'fulfilled' ? (ar.value.items || []) : [];
-    const albums = br.status === 'fulfilled' ? (br.value.items || []) : [];
+    let metaErr = '';
+    if (!songs.length) metaErr = sr.status === 'rejected' ? (sr.reason?.message || '오류') : ('결과 없음(' + rawN + ') ' + (sr.value?.dbg || ''));
     /* 검색어가 아티스트 이름과 정확히 일치하면, 상세 페이지와 같은 "깨끗한 원곡 목록"을 곡 맨 위에 둔다 */
     const nq = q.toLowerCase().replace(/\s+/g, '');
     const nm = x => (x?.name || '').toLowerCase().replace(/\s+/g, '');
@@ -1512,7 +1527,7 @@ async function doSearch(query) {
     }
     const sid = new Set(songs.map(t => t.id));
     const d = {
-        songs, artists, albums, metaErr,
+        songs, artists, albums, metaErr: songs.length ? '' : metaErr,
         videos: vr.status === 'fulfilled' ? sortMusicFirst(vr.value.tracks || []).filter(t => !sid.has(t.id)) : []
     };
     if (!d.songs.length && !d.artists.length && !d.albums.length && !d.videos.length) {
