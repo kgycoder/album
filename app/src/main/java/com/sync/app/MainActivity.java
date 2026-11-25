@@ -671,6 +671,9 @@ public class MainActivity extends AppCompatActivity {
             .format(new java.util.Date(System.currentTimeMillis() - 7L * 86400000L)) + ".01.00";
     private static final Pattern YTM_DUR = Pattern.compile("^\\d{1,2}:\\d{2}(:\\d{2})?$");
     private static final Pattern YTM_YEAR = Pattern.compile("^(19|20)\\d{2}$");
+    /** 현재 사용 중인 클라이언트 버전(검색이 비면 다른 버전으로 자동 전환 후 성공한 값을 유지) */
+    private volatile String ytmVer = YTM_VER;
+    private static final String[] YTM_ALT_VERS = { "1.20250310.01.00", "1.20241127.01.00", "1.20250901.01.00" };
     private static final Pattern YTM_TYPE = Pattern.compile(
             "^(곡|노래|동영상|앨범|싱글|EP|아티스트|재생목록|Song|Video|Album|Single|Artist|Playlist)$",
             Pattern.CASE_INSENSITIVE);
@@ -686,7 +689,7 @@ public class MainActivity extends AppCompatActivity {
     private String ytmCallOnce(String ep, JSONObject body) throws Exception {
         JSONObject client = new JSONObject();
         client.put("clientName", "WEB_REMIX");
-        client.put("clientVersion", YTM_VER);
+        client.put("clientVersion", ytmVer);
         client.put("hl", "ko");
         client.put("gl", "KR");
         body.put("context", new JSONObject().put("client", client));
@@ -695,7 +698,7 @@ public class MainActivity extends AppCompatActivity {
                 .post(RequestBody.create(body.toString(),
                         MediaType.parse("application/json; charset=utf-8")))
                 .addHeader("X-YouTube-Client-Name", "67")
-                .addHeader("X-YouTube-Client-Version", YTM_VER)
+                .addHeader("X-YouTube-Client-Version", ytmVer)
                 .addHeader("Origin", "https://music.youtube.com")
                 .addHeader("Referer", "https://music.youtube.com/")
                 .addHeader("Accept-Language", "ko-KR,ko;q=0.9,en;q=0.8")
@@ -946,7 +949,7 @@ public class MainActivity extends AppCompatActivity {
             String dbg = "";
             try {
                 JSONObject doc = new JSONObject(ytmCall("search", body));
-                ytmCollectSearch(doc, kind, kind.equals("song"), seen, out);   // 곡은 앨범/싱글/EP 에 속한 정식 음원만
+                ytmCollectSearch(doc, kind, false, seen, out);
                 if (out.length() == 0) {   // 진단용: 응답 구조 요약
                     StringBuilder ks = new StringBuilder();
                     java.util.Iterator<String> ki = doc.keys();
@@ -954,6 +957,19 @@ public class MainActivity extends AppCompatActivity {
                     dbg = "렌더러=" + ytmFind(doc, "musicResponsiveListItemRenderer").size() + " 키=" + ks + " 길이=" + doc.toString().length();
                 }
             } catch (Exception e) { firstErr = e; dbg = "오류=" + e.getMessage(); }
+            if (out.length() == 0) {
+                /* 응답이 비면(클라이언트 버전 거부/축소 가능성) 다른 버전으로 재시도하고, 성공한 버전을 유지 */
+                String keep = ytmVer;
+                for (String v : YTM_ALT_VERS) {
+                    if (v.equals(keep)) continue;
+                    try {
+                        ytmVer = v;
+                        ytmCollectSearch(new JSONObject(ytmCall("search", body)), kind, false, seen, out);
+                        if (out.length() > 0) { firstErr = null; break; }
+                    } catch (Exception e) { /* 다음 버전 시도 */ }
+                }
+                if (out.length() == 0) ytmVer = keep;
+            }
             if (out.length() == 0 && firstErr != null) throw firstErr;
             JSONObject res = new JSONObject();
             res.put("items", out);
