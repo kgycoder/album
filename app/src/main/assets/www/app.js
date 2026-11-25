@@ -1482,6 +1482,8 @@ async function doSearch(query) {
         cachedCall({ type: 'search', query: q }, 300000), mq('song'), mq('artist'), mq('album')]);
     let songs = sr.status === 'fulfilled' ? (sr.value.items || []) : [];
     /* 곡은 앨범/싱글/EP 에 속한 정식 음원만. 일반 YouTube 검색 결과로 대신 채우지 않는다. */
+    const artists = ar.status === 'fulfilled' ? (ar.value.items || []) : [];
+    const albums = br.status === 'fulfilled' ? (br.value.items || []) : [];
     const rawN = songs.length;
     songs = songs.filter(t => t.albumId);
     const nq = q.toLowerCase().replace(/\s+/g, '');
