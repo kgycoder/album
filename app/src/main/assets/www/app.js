@@ -1478,8 +1478,9 @@ async function doSearch(query) {
     _sStack.length = 0; _sRender = null; _miMode(false);
     /* 곡/아티스트/앨범은 YouTube Music 메타데이터(정제된 원곡)로, 영상은 기본 YouTube 검색으로 동시에 요청 */
     const mq = kind => cachedCall({ type: 'musicSearch', kind, query: q }, 300000);
-    const [vr, sr, ar, br] = await Promise.allSettled([
-        cachedCall({ type: 'search', query: q }, 300000), mq('song'), mq('artist'), mq('album')]);
+    const [vr, sr, ar, br, tr] = await Promise.allSettled([
+        cachedCall({ type: 'search', query: q }, 300000), mq('song'), mq('artist'), mq('album'),
+        cachedCall({ type: 'search', query: q + ' topic' }, 300000)]);
     let songs = sr.status === 'fulfilled' ? (sr.value.items || []) : [];
     /* 곡은 앨범/싱글/EP 에 속한 정식 음원만. 일반 YouTube 검색 결과로 대신 채우지 않는다. */
     const artists = ar.status === 'fulfilled' ? (ar.value.items || []) : [];
@@ -1490,7 +1491,21 @@ async function doSearch(query) {
     const nm = x => (x?.name || '').toLowerCase().replace(/\s+/g, '');
     const sameTitle = songs.some(t => (t.title || '').toLowerCase().replace(/\s+/g, '') === nq);
     const topArtist = !sameTitle && nm(artists[0]) === nq ? artists[0] : null;
-    const needAlb = songs.length < 3 && albums.length > 0;
+    /* 공식 음원 = 유튜브가 앨범 음원으로 자동 생성한 "아티스트 - Topic" 채널의 곡. 제목/아티스트에 검색어가 모두 들어 있는 것만 사용 */
+    const qw = q.toLowerCase().split(/\s+/).filter(Boolean);
+    const topicRe = /\s*-\s*topic\s*$/i;
+    const topic = [], tseen = new Set(songs.map(t => t.id));
+    [vr, tr].forEach(r => (r.status === 'fulfilled' ? (r.value.tracks || []) : []).forEach(t => {
+        if (!t?.id || tseen.has(t.id) || !topicRe.test(t.channel || '')) return;
+        const art = t.channel.replace(topicRe, '').trim();
+        const h = ((t.title || '') + art).toLowerCase().replace(/\s+/g, '');
+        if (!qw.every(w => h.includes(w))) return;
+        tseen.add(t.id); topic.push({ ...t, channel: art, _official: true });
+    }));
+    const tn = t => (t.title || '').toLowerCase().replace(/\s+/g, '');
+    topic.sort((x, y) => (tn(y) === nq) - (tn(x) === nq));
+    songs = [...songs, ...topic].slice(0, 40);
+    const needAlb = false;
     let metaErr = '';
     if (!songs.length) metaErr = sr.status === 'rejected' ? (sr.reason?.message || '오류') : ('결과 없음(' + rawN + ') ' + (sr.value?.dbg || ''));
     /* 추가 보강(아티스트 곡 목록 / 앨범 수록곡)은 화면을 막지 않고 백그라운드에서 수행 → 끝나면 곡 섹션만 갱신 */
