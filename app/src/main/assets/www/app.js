@@ -1441,6 +1441,7 @@ function _sHead(area, title) {
 function _renderSearch(d) {
     _miMode(false);
     const area = document.getElementById('s-res'); area.innerHTML = '';
+    if (d.dbgLine) { const dg = document.createElement('div'); dg.style.cssText = 'font-size:10px;opacity:.55;padding:6px 16px;word-break:break-all;user-select:text'; dg.textContent = d.dbgLine; area.appendChild(dg); }
     if (d.artists.length) {
         _sHead(area, '아티스트');
         const r = document.createElement('div'); r.className = 'hrow';
@@ -1521,6 +1522,7 @@ async function doSearch(query) {
     if (ytmSongs.length < 5 && vr.status === 'fulfilled') songs = merge(ytmSongs, pick(vr.value.tracks || []));
     const needAlb = false, needMore = ytmSongs.length < 5;
     let metaErr = '';
+    const dbgLine = '[진단] 곡검색 ' + (sr.status === 'rejected' ? '오류: ' + (sr.reason?.message || '') : (sr.value?.dbg || '')) + ' | 앨범검색 ' + (br.status === 'rejected' ? '오류' : (br.value?.dbg || '')).slice(0, 60);
     if (!ytmSongs.length) metaErr = sr.status === 'rejected' ? (sr.reason?.message || '오류') : ('결과 없음(' + rawN + ') ' + (sr.value?.dbg || ''));
     /* 추가 보강(아티스트 곡 목록 / 앨범 수록곡)은 화면을 막지 않고 백그라운드에서 수행 → 끝나면 곡 섹션만 갱신 */
     const enrich = async () => {
@@ -1554,7 +1556,7 @@ async function doSearch(query) {
     };
     const sid = new Set(songs.map(t => t.id));
     const d = {
-        songs, artists, albums, metaErr: ytmSongs.length ? '' : metaErr,
+        songs, artists, albums, dbgLine, metaErr: ytmSongs.length ? '' : metaErr,
         videos: vr.status === 'fulfilled' ? sortMusicFirst(vr.value.tracks || []).filter(t => !sid.has(t.id)) : []
     };
     if (!d.songs.length && !d.artists.length && !d.albums.length && !d.videos.length) {
