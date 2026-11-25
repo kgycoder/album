@@ -1519,8 +1519,8 @@ async function doSearch(query) {
         extra.forEach(t => { if (!seen.has(t.id)) { seen.add(t.id); res.push(t); } });
         return res.slice(0, 40);
     };
-    if (ytmSongs.length < 5 && vr.status === 'fulfilled') songs = merge(ytmSongs, pick(vr.value.tracks || []));
-    const needAlb = false, needMore = ytmSongs.length < 5;
+    if (ytmSongs.length === 0 && vr.status === 'fulfilled') songs = merge(ytmSongs, pick(vr.value.tracks || []));
+    const needAlb = false, needMore = ytmSongs.length === 0;
     let metaErr = '';
     const dbgLine = '[진단] 곡검색 ' + (sr.status === 'rejected' ? '오류: ' + (sr.reason?.message || '') : (sr.value?.dbg || '')) + ' | 앨범검색 ' + (br.status === 'rejected' ? '오류' : (br.value?.dbg || '')).slice(0, 60);
     if (!ytmSongs.length) metaErr = sr.status === 'rejected' ? (sr.reason?.message || '오류') : ('결과 없음(' + rawN + ') ' + (sr.value?.dbg || ''));
