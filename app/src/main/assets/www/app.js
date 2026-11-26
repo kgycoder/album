@@ -1470,6 +1470,31 @@ function _renderSearch(d) {
         area.appendChild(g);
     }
 }
+/* 검색어 ↔ 곡(제목/아티스트/앨범) 관련성: 검색어의 각 단어가 포함되거나, 편집거리 1(오타·글자 바뀜) 이내로 비슷하면 통과 */
+function _ed(a, b) {   // Damerau-Levenshtein(인접 교환 포함)
+    const m = a.length, n = b.length, d = [];
+    for (let i = 0; i <= m; i++) { d[i] = [i]; }
+    for (let j = 1; j <= n; j++) d[0][j] = j;
+    for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++) {
+        const c = a[i - 1] === b[j - 1] ? 0 : 1;
+        d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + c);
+        if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+    return d[m][n];
+}
+function _relevant(q, t) {
+    const norm = s => (s || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+    const hay = norm((t.title || '') + (t.channel || '') + (t.album || ''));
+    const toks = q.toLowerCase().split(/\s+/).map(norm).filter(Boolean);
+    if (!toks.length) return true;
+    return toks.every(w => {
+        if (hay.includes(w)) return true;
+        if (w.length < 4) return false;
+        for (const L of [w.length - 1, w.length, w.length + 1])
+            for (let i = 0; i + L <= hay.length; i++) if (_ed(w, hay.substr(i, L)) <= 1) return true;
+        return false;
+    });
+}
 async function doSearch(query) {
     if (!query?.trim()) return;
     miPopClose();
@@ -1490,12 +1515,15 @@ async function doSearch(query) {
     const artists = ar.status === 'fulfilled' ? (ar.value.items || []) : [];
     const albums = br.status === 'fulfilled' ? (br.value.items || []) : [];
     let songs = sr.status === 'fulfilled' ? (sr.value.items || []) : [];
+    const spath = sr.status === 'fulfilled' ? (sr.value.path || '') : '';
+    /* 정식 곡 필터가 아닌 우회 경로(전체검색/일반탐색)로 얻은 항목은 검색어와의 관련성(오타 1글자 허용)으로 걸러낸다 */
+    if (spath === '일반탐색' || spath === '전체-en') songs = songs.filter(t => _relevant(q, t));
     const official = songs.filter(t => t.albumId);          // 앨범/싱글/EP 소속 정식 음원 우선
     if (official.length) songs = official;
     const sid = new Set(songs.map(t => t.id));
     const d = {
         songs, artists, albums,
-        songNote: songs.length ? '' : (sr.status === 'rejected' ? 'YouTube Music 곡 검색 오류: ' + (sr.reason?.message || '') : 'YouTube Music 곡 검색 결과 없음 ' + (sr.value?.dbg || '')),
+        songNote: songs.length ? (spath === '일반탐색' || spath === '전체-en' ? '곡 검색 경로: ' + spath + ' (관련성 필터 적용)' : '') : (sr.status === 'rejected' ? 'YouTube Music 곡 검색 오류: ' + (sr.reason?.message || '') : 'YouTube Music 곡 검색 결과 없음 ' + (sr.value?.dbg || '')),
         videos: vr.status === 'fulfilled' ? sortMusicFirst(vr.value.tracks || []).filter(t => !sid.has(t.id)) : []
     };
     if (!d.songs.length && !d.artists.length && !d.albums.length && !d.videos.length) {
