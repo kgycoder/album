@@ -1451,6 +1451,12 @@ function _renderSearch(d) {
         const r = document.createElement('div'); r.className = 'hrow';
         d.albums.slice(0, 12).forEach(a => r.appendChild(mkAlbumCard(a))); area.appendChild(r);
     }
+    if (!d.songs.length && d.songNote) {
+        const nt = document.createElement('div');
+        nt.style.cssText = 'font-size:11px;opacity:.5;padding:6px 16px';
+        nt.textContent = '곡: ' + d.songNote;
+        area.appendChild(nt);
+    }
     if (d.songs.length) {
         _sHead(area, '곡');
         area.appendChild(_songList(d.songs, false));
@@ -1463,6 +1469,22 @@ function _renderSearch(d) {
         d.videos.forEach((t, i) => g.appendChild(mkCard(t, i, () => { S.q = d.videos; S.idx = i; playTrack(t, i); })));
         area.appendChild(g);
     }
+}
+/* Apple 음악 카탈로그 곡 검색: 1) Java 브릿지  2) 실패 시 WebView 에서 직접 요청 */
+async function itunesSongs(q) {
+    try {
+        const r = await callCs({ type: 'itunesSearch', query: q });
+        if (r.items?.length) return r;
+    } catch { }
+    const u = 'https://itunes.apple.com/search?media=music&entity=song&country=KR&lang=ko_kr&limit=40&term=' + encodeURIComponent(q);
+    const j = await (await fetch(u)).json();
+    return {
+        items: (j.results || []).filter(r => r.kind === 'song').map(r => ({
+            title: r.trackName, artist: r.artistName, album: r.collectionName,
+            dur: Math.round((r.trackTimeMillis || 0) / 1000), year: (r.releaseDate || '').slice(0, 4),
+            art: (r.artworkUrl100 || '').replace('100x100bb', '600x600bb')
+        }))
+    };
 }
 async function doSearch(query) {
     if (!query?.trim()) return;
@@ -1480,8 +1502,7 @@ async function doSearch(query) {
        곡: Apple 음악 카탈로그(정식 발매 음원, 관련도/인기순, 오타 보정)로 곡을 확정한 뒤 각 곡을 재생 가능한 YouTube 음원에 매칭 */
     const mq = kind => cachedCall({ type: 'musicSearch', kind, query: q }, 300000);
     const [vr, ar, br, ir] = await Promise.allSettled([
-        cachedCall({ type: 'search', query: q }, 300000), mq('artist'), mq('album'),
-        cachedCall({ type: 'itunesSearch', query: q }, 600000)]);
+        cachedCall({ type: 'search', query: q }, 300000), mq('artist'), mq('album'), itunesSongs(q)]);
     const artists = ar.status === 'fulfilled' ? (ar.value.items || []) : [];
     const albums = br.status === 'fulfilled' ? (br.value.items || []) : [];
     const norm = s => (s || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
@@ -1495,6 +1516,7 @@ async function doSearch(query) {
     });
     const d = {
         songs: [], artists, albums,
+        songNote: ir.status === 'rejected' ? 'Apple 카탈로그 오류: ' + (ir.reason?.message || '') : (catalog.length ? '' : 'Apple 카탈로그 결과 없음'),
         videos: vr.status === 'fulfilled' ? sortMusicFirst(vr.value.tracks || []) : []
     };
     if (!catalog.length && !d.artists.length && !d.albums.length && !d.videos.length) {
@@ -1534,7 +1556,7 @@ async function doSearch(query) {
         if (_sRender !== myRender) return;                       // 다른 화면으로 이동함
         const seen = new Set(), songs = [];
         list.forEach(t => { if (t && !seen.has(t.id)) { seen.add(t.id); songs.push(t); } });
-        if (!songs.length) return;
+        if (!songs.length) { d.songNote = '카탈로그 ' + catalog.length + '곡 중 YouTube 음원 매칭 0곡'; myRender(); return; }
         d.songs = songs;
         d.videos = d.videos.filter(t => !seen.has(t.id));
         myRender();
