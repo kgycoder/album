@@ -928,6 +928,95 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    /** 응답 안의 "...Renderer" 키 종류별 개수(진단용) */
+    private String ytmRendererHist(JSONObject doc) {
+        if (doc == null) return "없음";
+        java.util.TreeMap<String, Integer> m = new java.util.TreeMap<>();
+        ytmCountRenderers(doc, m);
+        StringBuilder sb = new StringBuilder();
+        int n = 0;
+        for (java.util.Map.Entry<String, Integer> e : m.entrySet()) {
+            if (n++ >= 14) break;
+            sb.append(e.getKey().replace("Renderer", "")).append('=').append(e.getValue()).append(' ');
+        }
+        return sb.length() == 0 ? "렌더러없음(길이" + doc.toString().length() + ")" : sb.toString().trim();
+    }
+
+    private void ytmCountRenderers(Object n, java.util.Map<String, Integer> m) {
+        if (n instanceof JSONObject) {
+            JSONObject o = (JSONObject) n;
+            java.util.Iterator<String> it = o.keys();
+            while (it.hasNext()) {
+                String k = it.next();
+                if (k.endsWith("Renderer")) m.put(k, m.containsKey(k) ? m.get(k) + 1 : 1);
+                ytmCountRenderers(o.opt(k), m);
+            }
+        } else if (n instanceof JSONArray) {
+            JSONArray a = (JSONArray) n;
+            for (int i = 0; i < a.length(); i++) ytmCountRenderers(a.opt(i), m);
+        }
+    }
+
+    /** 렌더러 종류와 무관하게: watchEndpoint 의 videoId 를 가진 가장 가까운 "...Renderer" 조상을 곡 항목으로 보고 메타 추출 */
+    private void ytmGeneric(Object root, java.util.HashSet<String> seen, JSONArray out) throws JSONException {
+        ytmGenericWalk(root, "", new java.util.ArrayList<Object[]>(), seen, out);
+    }
+
+    private void ytmGenericWalk(Object n, String key, java.util.ArrayList<Object[]> stack,
+                                java.util.HashSet<String> seen, JSONArray out) throws JSONException {
+        if (out.length() >= 20) return;
+        if (n instanceof JSONObject) {
+            JSONObject o = (JSONObject) n;
+            stack.add(new Object[]{ key, o });
+            String vid = key.equals("watchEndpoint") ? o.optString("videoId", "") : "";
+            if (!vid.isEmpty() && !seen.contains(vid)) {
+                JSONObject item = null;
+                for (int i = stack.size() - 1; i >= 0; i--) {
+                    String k = (String) stack.get(i)[0];
+                    if (k.endsWith("Renderer") && !k.startsWith("menu") && !k.startsWith("button")) { item = (JSONObject) stack.get(i)[1]; break; }
+                }
+                if (item != null) {
+                    java.util.ArrayList<JSONObject> runs = new java.util.ArrayList<>();
+                    ytmCollectRuns(item, runs, 0);
+                    if (!runs.isEmpty()) {
+                        String title = runs.get(0).optString("text", "").trim();
+                        JSONObject m = ytmMeta(runs.subList(1, runs.size()));
+                        if (!title.isEmpty() && !m.optString("artist").isEmpty() && seen.add(vid))
+                            out.put(ytmTrack(vid, title, m, ytmThumb(item)));
+                    }
+                }
+            }
+            java.util.Iterator<String> it = o.keys();
+            while (it.hasNext()) {
+                String k = it.next();
+                ytmGenericWalk(o.opt(k), k, stack, seen, out);
+            }
+            stack.remove(stack.size() - 1);
+        } else if (n instanceof JSONArray) {
+            JSONArray a = (JSONArray) n;
+            for (int i = 0; i < a.length(); i++) ytmGenericWalk(a.opt(i), key, stack, seen, out);
+        }
+    }
+
+    /** 항목 안의 텍스트 run 을 문서 순서대로 수집(메뉴/오버레이 제외) */
+    private void ytmCollectRuns(Object n, java.util.ArrayList<JSONObject> runs, int depth) {
+        if (depth > 12) return;
+        if (n instanceof JSONObject) {
+            JSONObject o = (JSONObject) n;
+            if (o.has("text") && o.opt("text") instanceof String && runs.size() < 12) { runs.add(o); }
+            java.util.Iterator<String> it = o.keys();
+            while (it.hasNext()) {
+                String k = it.next();
+                if (k.equals("menu") || k.equals("overlay") || k.equals("thumbnail") || k.equals("accessibility")
+                        || k.equals("accessibilityData") || k.equals("trackingParams")) continue;
+                ytmCollectRuns(o.opt(k), runs, depth + 1);
+            }
+        } else if (n instanceof JSONArray) {
+            JSONArray a = (JSONArray) n;
+            for (int i = 0; i < a.length(); i++) ytmCollectRuns(a.opt(i), runs, depth + 1);
+        }
+    }
+
     private void doMusicSearch(JSONObject msg) {
         String id = msg.optString("id", "0");
         try {
@@ -938,16 +1027,19 @@ public class MainActivity extends AppCompatActivity {
             String q = msg.optString("query");
             JSONArray out = new JSONArray();
             java.util.HashSet<String> seen = new java.util.HashSet<>();
-            String path = "";
+            String path = "", dbg = "";
             Exception firstErr = null;
             if (kind.equals("song")) {
                 /* 곡 필터 검색은 로케일 의존적(ko 에서 빈 응답) → en, ko 순으로 시도하고, 둘 다 비면 필터 없는 전체 검색(en)의 곡 선반을 사용 */
                 String[] hls = { "en", "ko" };
+                JSONObject docF = null, docU = null;
                 for (int i = 0; i < hls.length && out.length() == 0; i++) {
                     try {
                         JSONObject b = new JSONObject();
                         b.put("query", q); b.put("params", p); b.put("_hl", hls[i]);
-                        ytmAddRows(new JSONObject(ytmCall("search", b)), seen, out, "song");
+                        JSONObject d = new JSONObject(ytmCall("search", b));
+                        if (docF == null) docF = d;
+                        ytmAddRows(d, seen, out, "song");
                         if (out.length() > 0) path = "필터-" + hls[i];
                     } catch (Exception e) { firstErr = e; }
                 }
@@ -955,9 +1047,21 @@ public class MainActivity extends AppCompatActivity {
                     try {
                         JSONObject b = new JSONObject();
                         b.put("query", q); b.put("_hl", "en");
-                        ytmSongShelves(new JSONObject(ytmCall("search", b)), seen, out);
+                        docU = new JSONObject(ytmCall("search", b));
+                        ytmSongShelves(docU, seen, out);
                         if (out.length() > 0) path = "전체-en";
                     } catch (Exception e) { firstErr = e; }
+                }
+                /* 마지막 수단: 렌더러 종류에 상관없이 videoId 를 가진 항목을 일반 구조 탐색으로 추출 */
+                if (out.length() == 0) {
+                    try {
+                        if (docF != null) ytmGeneric(docF, seen, out);
+                        if (out.length() == 0 && docU != null) ytmGeneric(docU, seen, out);
+                        if (out.length() > 0) path = "일반탐색";
+                    } catch (Exception e) { firstErr = e; }
+                }
+                if (out.length() == 0) {   // 진단: 응답에 어떤 렌더러가 있는지
+                    dbg = "필터:" + ytmRendererHist(docF) + " | 전체:" + ytmRendererHist(docU);
                 }
             } else {
                 JSONObject b = new JSONObject();
@@ -968,6 +1072,7 @@ public class MainActivity extends AppCompatActivity {
             JSONObject res = new JSONObject();
             res.put("items", out);
             res.put("path", path);
+            res.put("dbg", dbg);
             ytmSend(id, res, null);
         } catch (Exception e) { ytmSend(id, null, String.valueOf(e.getMessage())); }
     }
