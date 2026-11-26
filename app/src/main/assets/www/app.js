@@ -1495,7 +1495,7 @@ async function doSearch(query) {
     const sid = new Set(songs.map(t => t.id));
     const d = {
         songs, artists, albums,
-        songNote: songs.length ? '' : (sr.status === 'rejected' ? 'YouTube Music 곡 검색 오류: ' + (sr.reason?.message || '') : 'YouTube Music 곡 검색 결과 없음'),
+        songNote: songs.length ? '' : (sr.status === 'rejected' ? 'YouTube Music 곡 검색 오류: ' + (sr.reason?.message || '') : 'YouTube Music 곡 검색 결과 없음 ' + (sr.value?.dbg || '')),
         videos: vr.status === 'fulfilled' ? sortMusicFirst(vr.value.tracks || []).filter(t => !sid.has(t.id)) : []
     };
     if (!d.songs.length && !d.artists.length && !d.albums.length && !d.videos.length) {
