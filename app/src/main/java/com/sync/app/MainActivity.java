@@ -309,8 +309,6 @@ public class MainActivity extends AppCompatActivity {
                         executor.submit(() -> doSuggest(msg)); break;
                     case "musicSearch":
                         executor.submit(() -> doMusicSearch(msg)); break;
-                    case "itunesSearch":
-                        executor.submit(() -> doItunesSearch(msg)); break;
                     case "musicBrowse":
                         executor.submit(() -> doMusicBrowse(msg)); break;
                     case "musicNext":
@@ -651,15 +649,23 @@ public class MainActivity extends AppCompatActivity {
 
     /** 일시적인 400/5xx/네트워크 오류는 한 번 재시도 */
     private String ytmCall(String ep, JSONObject body) throws Exception {
+        String hl0 = body.optString("_hl", "");
         try { return ytmCallOnce(ep, body); }
-        catch (IOException e) { Thread.sleep(300); return ytmCallOnce(ep, body); }
+        catch (IOException e) {
+            Thread.sleep(300);
+            if (!hl0.isEmpty()) body.put("_hl", hl0);
+            return ytmCallOnce(ep, body);
+        }
     }
 
     private String ytmCallOnce(String ep, JSONObject body) throws Exception {
+        /* 언어(hl) 지정: YouTube Music 곡 필터 검색은 ko 로케일에서 빈 응답이 오는 경우가 있어 en 으로 요청할 수 있게 함 */
+        final String hl = body.optString("_hl", "ko");
+        body.remove("_hl");
         JSONObject client = new JSONObject();
         client.put("clientName", "WEB_REMIX");
         client.put("clientVersion", YTM_VER);
-        client.put("hl", "ko");
+        client.put("hl", hl);
         client.put("gl", "KR");
         body.put("context", new JSONObject().put("client", client));
         Request req = new Request.Builder()
@@ -670,7 +676,7 @@ public class MainActivity extends AppCompatActivity {
                 .addHeader("X-YouTube-Client-Version", YTM_VER)
                 .addHeader("Origin", "https://music.youtube.com")
                 .addHeader("Referer", "https://music.youtube.com/")
-                .addHeader("Accept-Language", "ko-KR,ko;q=0.9,en;q=0.8")
+                .addHeader("Accept-Language", hl.equals("en") ? "en-US,en;q=0.9" : "ko-KR,ko;q=0.9,en;q=0.8")
                 .addHeader("User-Agent", "Mozilla/5.0 (Linux; Android 14) "
                         + "AppleWebKit/537.36 Chrome/124.0 Safari/537.36")
                 .build();
@@ -890,6 +896,38 @@ public class MainActivity extends AppCompatActivity {
         } catch (JSONException ignored) {}
     }
 
+    private static final Pattern YTM_SONGSHELF = Pattern.compile("^(곡|노래|Songs?)$", Pattern.CASE_INSENSITIVE);
+
+    private void ytmAddRows(Object container, java.util.HashSet<String> seen, JSONArray out, String kind) throws JSONException {
+        for (Object r : ytmFind(container, "musicResponsiveListItemRenderer")) {
+            if (!(r instanceof JSONObject)) continue;
+            JSONObject it = ytmList((JSONObject) r);
+            if (it == null || !it.optString("kind").equals(kind)) continue;
+            if (!seen.add(it.optString("id"))) continue;
+            out.put(it);
+            if (out.length() >= 20) break;
+        }
+    }
+
+    /** 필터 없는 전체 검색 응답에서 곡만 추출: 상단 결과 카드(곡) → 카드 안 곡 → "노래/Songs" 선반 */
+    private void ytmSongShelves(JSONObject doc, java.util.HashSet<String> seen, JSONArray out) throws JSONException {
+        for (Object o : ytmFind(doc, "musicCardShelfRenderer")) {
+            if (!(o instanceof JSONObject)) continue;
+            JSONObject card = (JSONObject) o;
+            String vid = ytmStr(card.optJSONObject("title"), "videoId");
+            if (vid.isEmpty()) vid = ytmStr(card.optJSONObject("onTap"), "videoId");
+            JSONObject m = ytmMeta(ytmRuns(card, "subtitle"));
+            if (!vid.isEmpty() && YTM_SONGSHELF.matcher(m.optString("label")).matches() && seen.add(vid))
+                out.put(ytmTrack(vid, ytmText(card, "title"), m, ytmThumb(card.optJSONObject("thumbnail"))));
+            ytmAddRows(card, seen, out, "song");
+        }
+        for (Object o : ytmFind(doc, "musicShelfRenderer")) {
+            if (!(o instanceof JSONObject)) continue;
+            JSONObject sh = (JSONObject) o;
+            if (YTM_SONGSHELF.matcher(ytmText(sh, "title")).matches()) ytmAddRows(sh, seen, out, "song");
+        }
+    }
+
     private void doMusicSearch(JSONObject msg) {
         String id = msg.optString("id", "0");
         try {
@@ -897,53 +935,39 @@ public class MainActivity extends AppCompatActivity {
             String p = kind.equals("artist") ? "EgWKAQIgAWoMEA4QChADEAQQCRAF"
                      : kind.equals("album")  ? "EgWKAQIYAWoMEA4QChADEAQQCRAF"
                                              : "EgWKAQIIAWoMEA4QChADEAQQCRAF";
-            JSONObject body = new JSONObject();
-            body.put("query", msg.optString("query"));
-            body.put("params", p);
-            JSONObject doc = new JSONObject(ytmCall("search", body));
+            String q = msg.optString("query");
             JSONArray out = new JSONArray();
             java.util.HashSet<String> seen = new java.util.HashSet<>();
-            for (Object o : ytmFind(doc, "musicResponsiveListItemRenderer")) {
-                if (!(o instanceof JSONObject)) continue;
-                JSONObject it = ytmList((JSONObject) o);
-                if (it == null || !it.optString("kind").equals(kind)) continue;
-                if (!seen.add(it.optString("id"))) continue;
-                out.put(it);
-                if (out.length() >= 20) break;
-            }
-            JSONObject res = new JSONObject();
-            res.put("items", out);
-            ytmSend(id, res, null);
-        } catch (Exception e) { ytmSend(id, null, String.valueOf(e.getMessage())); }
-    }
-
-    /** 곡 메타데이터 검색: Apple 음악 카탈로그(정식 발매 음원, 인기/관련도 순, 오타 보정). 결과는 searchResult 로 반환 */
-    private void doItunesSearch(JSONObject msg) {
-        String id = msg.optString("id", "0");
-        try {
-            String url = "https://itunes.apple.com/search?media=music&entity=song&country=KR&lang=ko_kr&limit=40&term="
-                    + java.net.URLEncoder.encode(msg.optString("query"), "UTF-8");
-            Request req = new Request.Builder().url(url)
-                    .addHeader("Accept-Language", "ko-KR,ko;q=0.9,en;q=0.8").build();
-            JSONArray out = new JSONArray();
-            try (Response resp = http.newCall(req).execute()) {
-                if (!resp.isSuccessful() || resp.body() == null) throw new IOException("HTTP " + resp.code());
-                JSONArray rs = new JSONObject(readUtf8(resp)).optJSONArray("results");
-                for (int i = 0; rs != null && i < rs.length(); i++) {
-                    JSONObject r = rs.optJSONObject(i);
-                    if (r == null || !"song".equals(r.optString("kind"))) continue;
-                    JSONObject t = new JSONObject();
-                    t.put("title", r.optString("trackName"));
-                    t.put("artist", r.optString("artistName"));
-                    t.put("album", r.optString("collectionName"));
-                    t.put("dur", (int) Math.round(r.optLong("trackTimeMillis") / 1000.0));
-                    t.put("year", r.optString("releaseDate").length() >= 4 ? r.optString("releaseDate").substring(0, 4) : "");
-                    t.put("art", r.optString("artworkUrl100").replace("100x100bb", "600x600bb"));
-                    out.put(t);
+            String path = "";
+            Exception firstErr = null;
+            if (kind.equals("song")) {
+                /* 곡 필터 검색은 로케일 의존적(ko 에서 빈 응답) → en, ko 순으로 시도하고, 둘 다 비면 필터 없는 전체 검색(en)의 곡 선반을 사용 */
+                String[] hls = { "en", "ko" };
+                for (int i = 0; i < hls.length && out.length() == 0; i++) {
+                    try {
+                        JSONObject b = new JSONObject();
+                        b.put("query", q); b.put("params", p); b.put("_hl", hls[i]);
+                        ytmAddRows(new JSONObject(ytmCall("search", b)), seen, out, "song");
+                        if (out.length() > 0) path = "필터-" + hls[i];
+                    } catch (Exception e) { firstErr = e; }
                 }
+                if (out.length() == 0) {
+                    try {
+                        JSONObject b = new JSONObject();
+                        b.put("query", q); b.put("_hl", "en");
+                        ytmSongShelves(new JSONObject(ytmCall("search", b)), seen, out);
+                        if (out.length() > 0) path = "전체-en";
+                    } catch (Exception e) { firstErr = e; }
+                }
+            } else {
+                JSONObject b = new JSONObject();
+                b.put("query", q); b.put("params", p);
+                ytmAddRows(new JSONObject(ytmCall("search", b)), seen, out, kind);
             }
+            if (out.length() == 0 && firstErr != null) throw firstErr;
             JSONObject res = new JSONObject();
             res.put("items", out);
+            res.put("path", path);
             ytmSend(id, res, null);
         } catch (Exception e) { ytmSend(id, null, String.valueOf(e.getMessage())); }
     }
