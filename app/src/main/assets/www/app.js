@@ -1470,22 +1470,6 @@ function _renderSearch(d) {
         area.appendChild(g);
     }
 }
-/* Apple 음악 카탈로그 곡 검색: 1) Java 브릿지  2) 실패 시 WebView 에서 직접 요청 */
-async function itunesSongs(q) {
-    try {
-        const r = await callCs({ type: 'itunesSearch', query: q });
-        if (r.items?.length) return r;
-    } catch { }
-    const u = 'https://itunes.apple.com/search?media=music&entity=song&country=KR&lang=ko_kr&limit=40&term=' + encodeURIComponent(q);
-    const j = await (await fetch(u)).json();
-    return {
-        items: (j.results || []).filter(r => r.kind === 'song').map(r => ({
-            title: r.trackName, artist: r.artistName, album: r.collectionName,
-            dur: Math.round((r.trackTimeMillis || 0) / 1000), year: (r.releaseDate || '').slice(0, 4),
-            art: (r.artworkUrl100 || '').replace('100x100bb', '600x600bb')
-        }))
-    };
-}
 async function doSearch(query) {
     if (!query?.trim()) return;
     miPopClose();
@@ -1498,28 +1482,23 @@ async function doSearch(query) {
     const area = document.getElementById('s-res');
     area.innerHTML = `<div class="state"><div class="spinner"></div><p style="margin-top:12px">검색 중...</p></div>`;
     _sStack.length = 0; _sRender = null; _miMode(false);
-    /* 아티스트/앨범: YouTube Music 메타데이터 · 영상: 기본 YouTube 검색 ·
-       곡: Apple 음악 카탈로그(정식 발매 음원, 관련도/인기순, 오타 보정)로 곡을 확정한 뒤 각 곡을 재생 가능한 YouTube 음원에 매칭 */
+    /* 곡·아티스트·앨범: YouTube Music 메타데이터(music.youtube.com 검색과 동일 소스) · 영상: 기본 YouTube 검색.
+       곡 검색은 Java 쪽에서 로케일(en→ko)·필터/전체검색 순으로 폴백한다. */
     const mq = kind => cachedCall({ type: 'musicSearch', kind, query: q }, 300000);
-    const [vr, ar, br, ir] = await Promise.allSettled([
-        cachedCall({ type: 'search', query: q }, 300000), mq('artist'), mq('album'), itunesSongs(q)]);
+    const [vr, sr, ar, br] = await Promise.allSettled([
+        cachedCall({ type: 'search', query: q }, 300000), mq('song'), mq('artist'), mq('album')]);
     const artists = ar.status === 'fulfilled' ? (ar.value.items || []) : [];
     const albums = br.status === 'fulfilled' ? (br.value.items || []) : [];
-    const norm = s => (s || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
-    const baseT = s => (s || '').replace(/\(.*?\)|\[.*?\]/g, '');
-    const skipRe = /instrumental|inst\.|karaoke|노래방|\bMR\b/i;
-    const catalog = [], ckeys = new Set();
-    (ir.status === 'fulfilled' ? (ir.value.items || []) : []).forEach(a => {
-        if (!a.title || (skipRe.test(a.title + ' ' + a.album) && !skipRe.test(q))) return;
-        const k = norm(a.artist) + '|' + norm(baseT(a.title));
-        if (ckeys.has(k)) return; ckeys.add(k); catalog.push(a);
-    });
+    let songs = sr.status === 'fulfilled' ? (sr.value.items || []) : [];
+    const official = songs.filter(t => t.albumId);          // 앨범/싱글/EP 소속 정식 음원 우선
+    if (official.length) songs = official;
+    const sid = new Set(songs.map(t => t.id));
     const d = {
-        songs: [], artists, albums,
-        songNote: ir.status === 'rejected' ? 'Apple 카탈로그 오류: ' + (ir.reason?.message || '') : (catalog.length ? '' : 'Apple 카탈로그 결과 없음'),
-        videos: vr.status === 'fulfilled' ? sortMusicFirst(vr.value.tracks || []) : []
+        songs, artists, albums,
+        songNote: songs.length ? '' : (sr.status === 'rejected' ? 'YouTube Music 곡 검색 오류: ' + (sr.reason?.message || '') : 'YouTube Music 곡 검색 결과 없음'),
+        videos: vr.status === 'fulfilled' ? sortMusicFirst(vr.value.tracks || []).filter(t => !sid.has(t.id)) : []
     };
-    if (!catalog.length && !d.artists.length && !d.albums.length && !d.videos.length) {
+    if (!d.songs.length && !d.artists.length && !d.albums.length && !d.videos.length) {
         const err = vr.status === 'rejected' ? vr.reason?.message : '';
         area.innerHTML = err ? `<div class="state"><h3>검색 실패</h3><p>${esc(err)}</p></div>`
             : `<div class="state"><h3>결과 없음</h3><p>다른 검색어를 시도해보세요</p></div>`;
@@ -1527,40 +1506,6 @@ async function doSearch(query) {
     }
     const myRender = () => _renderSearch(d);
     _sRender = myRender; myRender();
-
-    /* 카탈로그 곡 → YouTube 음원 매칭: 재생시간(±초) · 제목/아티스트 일치 · "- Topic"/Official Audio 가산, 커버/라이브/리믹스 등 감점 */
-    const topicRe = /\s*-\s*topic\s*$/i;
-    const badRe = /cover|커버|live|라이브|remix|sped|slowed|reaction|리액션|instrumental|karaoke|노래방|nightcore|8d|teaser|trailer|behind|making|practice|안무|fancam|직캠|mashup/i;
-    const resolve = async a => {
-        const r = await cachedCall({ type: 'search', query: a.artist + ' ' + a.title }, 600000);
-        const bt = norm(baseT(a.title)) || norm(a.title);
-        const an = norm((a.artist || '').split(/[,&]|feat\.?|ft\.?/i)[0]);
-        const badOwn = badRe.test(a.title + ' ' + a.album);
-        let best = null, bs = -99;
-        (r.tracks || []).slice(0, 12).forEach(c => {
-            let sc = 0;
-            const dd = Math.abs((c.dur || 0) - (a.dur || 0));
-            if (c.dur && a.dur) sc += dd <= 2 ? 8 : dd <= 5 ? 4 : dd > 15 ? -8 : 0;
-            if (topicRe.test(c.channel || '')) sc += 6;
-            if (/official audio|\baudio\b/i.test(c.title || '')) sc += 2;
-            if (norm(c.title).includes(bt)) sc += 4; else sc -= 6;
-            if (an && norm((c.title || '') + (c.channel || '')).includes(an)) sc += 3;
-            if (!badOwn && badRe.test(c.title || '')) sc -= 8;
-            if (sc > bs) { bs = sc; best = c; }
-        });
-        if (!best || bs < 8) return null;
-        return { id: best.id, title: a.title, channel: a.artist, thumb: best.thumb, art: a.art, album: a.album,
-                 dur: a.dur || best.dur, year: a.year, kind: 'song' };
-    };
-    Promise.all(catalog.slice(0, 10).map(a => resolve(a).catch(() => null))).then(list => {
-        if (_sRender !== myRender) return;                       // 다른 화면으로 이동함
-        const seen = new Set(), songs = [];
-        list.forEach(t => { if (t && !seen.has(t.id)) { seen.add(t.id); songs.push(t); } });
-        if (!songs.length) { d.songNote = '카탈로그 ' + catalog.length + '곡 중 YouTube 음원 매칭 0곡'; myRender(); return; }
-        d.songs = songs;
-        d.videos = d.videos.filter(t => !seen.has(t.id));
-        myRender();
-    }).catch(() => { });
 }
 
 /* ── 아티스트 / 앨범 상세 ── */
